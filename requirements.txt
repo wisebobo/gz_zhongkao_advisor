@@ -1,0 +1,18 @@
+# FastAPI Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Database ORM
+sqlalchemy==2.0.25
+
+# Data Validation
+pydantic==2.5.3
+
+# Environment Configuration
+python-dotenv==1.0.0
+
+# CORS Support (included in fastapi)
+# starlette is dependency of fastapi
+
+# HTTP Server
+# uvicorn handles this
