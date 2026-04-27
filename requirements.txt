@@ -1,18 +1,26 @@
-# FastAPI Web Framework
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+# ============================================================================
+# Python Dependencies for Guangzhou High School Entrance Exam Advisor
+# Compatible with Python 3.11, 3.12, 3.13, 3.14+
+# ============================================================================
 
-# Database ORM
-sqlalchemy==2.0.25
+# FastAPI Web Framework (supports Python 3.8+)
+fastapi>=0.115.0,<0.116.0
 
-# Data Validation
-pydantic==2.5.3
+# ASGI Server with standard extras (supports Python 3.8+)
+uvicorn[standard]>=0.32.0,<0.33.0
 
-# Environment Configuration
-python-dotenv==1.0.0
+# Database ORM - SQLAlchemy 2.x (supports Python 3.7+)
+sqlalchemy>=2.0.36,<2.1.0
 
-# CORS Support (included in fastapi)
-# starlette is dependency of fastapi
+# Data Validation - Pydantic V2 (supports Python 3.8+)
+pydantic>=2.9.0,<3.0.0
 
-# HTTP Server
-# uvicorn handles this
+# Environment Configuration (supports Python 3.8+)
+python-dotenv>=1.0.1,<2.0.0
+
+# ============================================================================
+# Notes:
+# - All packages are compatible with Python 3.11, 3.12, 3.13, 3.14+
+# - Version ranges ensure stability while allowing security patches
+# - Use 'pip install -r requirements.txt' to install dependencies
+# ============================================================================
