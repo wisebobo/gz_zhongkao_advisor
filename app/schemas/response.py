@@ -9,6 +9,7 @@ class SchoolInfo(BaseModel):
     school_id: int
     school_name: str
     district: str
+    school_type: str = Field(default="公办", description="School Type: 公办/民办")
 
 class ScoreHistory(BaseModel):
     """Score History Record"""

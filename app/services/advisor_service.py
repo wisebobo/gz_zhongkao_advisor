@@ -465,7 +465,8 @@ class AdvisorService:
                     'predicted_score': round(predicted_score, 1),
                     'school_gradient': school_gradient,
                     'last_volunteer_rank': last_volunteer_rank,
-                    'trend_info': trend_info
+                    'trend_info': trend_info,
+                    'is_private': school_id in private_school_ids  # ⭐ Add school type flag
                 })
         
         return weighted_schools
@@ -836,7 +837,8 @@ class AdvisorService:
                     school_info=SchoolInfo(
                         school_id=school_id,
                         school_name=school_name,
-                        district=district_name
+                        district=district_name,
+                        school_type="民办" if school_data.get('is_private', False) else "公办"  # ⭐ Set school type
                     ),
                     risk_level=risk_level,
                     admission_probability=probability,
@@ -852,14 +854,19 @@ class AdvisorService:
                     used_school_ids.add(school_id)
                     primary_selected = True
             
-            # Store all candidates for this position
+            # Store all candidates for this position (limit to max 5: 1 primary + 4 alternatives)
             if position_candidates:
+                # ⭐ Limit to maximum 5 candidates per position
+                MAX_CANDIDATES_PER_POSITION = 5
+                if len(position_candidates) > MAX_CANDIDATES_PER_POSITION:
+                    position_candidates = position_candidates[:MAX_CANDIDATES_PER_POSITION]
+                
                 position_strategy = "冲刺" if pos <= 2 else ("稳妥" if pos <= 4 else "保底")
                 all_position_candidates.append(
                     VolunteerPosition(
                         position_number=pos,
                         recommended_school=position_candidates[0],
-                        alternative_schools=position_candidates[1:],
+                        alternative_schools=position_candidates[1:],  # Max 4 alternatives
                         position_strategy=position_strategy
                     )
                 )
@@ -891,54 +898,146 @@ class AdvisorService:
     ) -> float:
         """
         Calculate admission probability based on gradient rules
-        """
-        # Rule 1: Last volunteer rank constraint
-        if last_volunteer_rank is not None:
-            if volunteer_position > last_volunteer_rank + 3:
-                # Severely penalize if position far exceeds last rank
-                return 0.02
-            elif volunteer_position > last_volunteer_rank:
-                # Moderate penalty if position slightly exceeds last rank
-                pass
         
-        # Rule 2: Gradient gap impact
+        ⭐ 核心原则（按优先级）：
+        1. 不同梯度 → 梯度优先（高分梯度必然优先录取）
+        2. 同一梯度 → 志愿优先（同一梯度内，志愿顺序决定录取顺序）
+        3. 同一志愿 → 分数优先（同志愿内，分数高的优先）
+        4. 同分情况 → 末位志愿号才有意义
+        """
+        
+        # Rule 1: Last volunteer rank constraint - ⭐ ONLY applies when score gap is small
+        # 末位志愿号只在分数接近时才有意义，分差大时完全无效
+        last_rank_penalty = 1.0  # Default: no penalty
+        
+        if last_volunteer_rank is not None and abs(score_gap) <= 10:
+            # 只有在分差≤10分时，末位志愿号才可能有影响
+            # 因为此时可能进入同分比较环节
+            if volunteer_position > last_volunteer_rank:
+                excess = volunteer_position - last_volunteer_rank
+                
+                if excess <= 2:
+                    # 轻微超出：小幅惩罚
+                    last_rank_penalty = 0.95
+                elif excess <= 4:
+                    # 中度超出：中等惩罚
+                    last_rank_penalty = 0.85
+                else:
+                    # 严重超出：较大惩罚（但仍不是极端值）
+                    last_rank_penalty = 0.70
+            # 注意：如果分差>10分，完全不应用末位志愿号惩罚
+        
+        # Rule 2: Gradient gap impact (PRIMARY FACTOR)
+        # ⭐ FIXED: Only apply gradient penalty when score gap is small
+        # When score gap is large, the gap already reflects the advantage
         if school_gradient and student_gradient:
             gradient_diff = school_gradient - student_gradient
-            if gradient_diff > 0:
-                base_prob = max(0.15, 0.55 - gradient_diff * 0.12)
+            
+            # 只有当分差较小时（≤20分），梯度差异才有参考意义
+            # 分差大时，分数优势已经体现了梯度差异，不应重复惩罚
+            if abs(score_gap) <= 20:
+                # 小分差场景：梯度差异影响基础概率
+                if gradient_diff > 0:
+                    # 学校梯度更高（更难考），基础概率降低
+                    base_prob = max(0.15, 0.55 - gradient_diff * 0.12)
+                else:
+                    # 学生梯度≥学校梯度，基础概率较高
+                    base_prob = 0.75
             else:
+                # 大分差场景：忽略梯度差异，给予高基础概率
+                # 因为分差已经反映了实际的分数优势
                 base_prob = 0.75
         else:
             base_prob = 0.55
         
-        # Rule 3: Score gap adjustment
-        if score_gap >= 30:
-            base_prob = min(base_prob + 0.35, 0.98)
+        # Rule 3: Score gap adjustment (CRITICAL for cross-gradient advantage)
+        # ⭐ FIXED: Remove intermediate caps to allow large gaps to overcome penalties
+        if score_gap >= 80:
+            # ⭐ 绝对优势（80分以上）：极大奖励
+            base_prob += 0.50
+        elif score_gap >= 70:
+            # 极大优势（70-80分）
+            base_prob += 0.48
+        elif score_gap >= 60:
+            # 超大优势（60-70分）
+            base_prob += 0.45
+        elif score_gap >= 50:
+            # 很大优势（50-60分）
+            base_prob += 0.42
+        elif score_gap >= 40:
+            # 跨梯度优势（40-50分）
+            base_prob += 0.40
+        elif score_gap >= 30:
+            base_prob += 0.35
         elif score_gap >= 20:
-            base_prob = min(base_prob + 0.30, 0.95)
+            base_prob += 0.30
         elif score_gap >= 10:
-            base_prob = min(base_prob + 0.20, 0.85)
+            base_prob += 0.20
         elif score_gap >= 5:
-            base_prob = min(base_prob + 0.12, 0.75)
+            base_prob += 0.12
         elif score_gap >= 0:
-            base_prob = min(base_prob + 0.05, 0.65)
+            base_prob += 0.05
         elif score_gap >= -5:
-            base_prob = max(base_prob - 0.08, 0.35)
+            base_prob -= 0.08
         elif score_gap >= -10:
-            base_prob = max(base_prob - 0.15, 0.25)
+            base_prob -= 0.15
         elif score_gap >= -20:
-            base_prob = max(base_prob - 0.25, 0.15)
+            base_prob -= 0.25
         else:
-            base_prob = max(base_prob - 0.35, 0.08)
+            base_prob -= 0.35
         
-        # Trend adjustment
+        # Clamp after score gap adjustment to prevent extreme values
+        base_prob = max(0.10, min(1.00, base_prob))
+        
+        # Apply last volunteer rank penalty (only if applicable)
+        base_prob *= last_rank_penalty
+        
+        # Trend adjustment - ⭐ MINIMAL impact for very large score gaps
+        # 当分差非常大时，趋势的影响应该极小，几乎可以忽略
         if trend == "上升":
-            base_prob *= 0.92
+            # 上升趋势会降低概率，但超大分差时影响应该极小
+            if abs(score_gap) >= 70:
+                # 极大分差：几乎不惩罚（只降低0.5%）
+                base_prob *= 0.995
+            elif abs(score_gap) >= 60:
+                # 超大分差：极轻微惩罚（降低1%）
+                base_prob *= 0.99
+            elif abs(score_gap) >= 40:
+                # 大分差：轻微惩罚（降低1.5%）
+                base_prob *= 0.985
+            elif abs(score_gap) >= 20:
+                # 中等分差：中度惩罚（降低3%）
+                base_prob *= 0.97
+            else:
+                # 小分差：正常惩罚（降低5%）
+                base_prob *= 0.95
         elif trend == "下降":
-            base_prob *= 1.08
+            # 下降趋势会提高概率，但大分差时增幅应受限
+            if abs(score_gap) >= 70:
+                # 极大分差：几乎不提升（只增加0.5%）
+                base_prob *= 1.005
+            elif abs(score_gap) >= 60:
+                # 超大分差：极轻微提升（增加0.8%）
+                base_prob *= 1.008
+            elif abs(score_gap) >= 40:
+                # 大分差：轻微提升（增加1%）
+                base_prob *= 1.01
+            elif abs(score_gap) >= 20:
+                # 中等分差：中度提升（增加2%）
+                base_prob *= 1.02
+            else:
+                # 小分差：正常提升（增加5%）
+                base_prob *= 1.05
         
-        # Volunteer position slight decay
-        position_decay = 1.0 - (volunteer_position - 1) * 0.015
+        # Volunteer position decay - ⭐ REDUCED for high probability scenarios
+        # 当基础概率已经很高时（通常对应超大分差保底），位置衰减应该更小
+        if base_prob >= 0.90:
+            # 高概率场景：衰减减半，确保保底志愿稳定性
+            position_decay = 1.0 - (volunteer_position - 1) * 0.008
+        else:
+            # 普通场景：正常衰减
+            position_decay = 1.0 - (volunteer_position - 1) * 0.015
+        
         base_prob *= position_decay
         
         return round(max(0.05, min(0.98, base_prob)), 2)
