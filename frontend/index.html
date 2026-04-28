@@ -740,73 +740,107 @@
                 `;
                 planCard.appendChild(header);
 
-                // 志愿表格（包含详细数据）
-                const table = document.createElement('table');
-                table.className = 'volunteer-table volunteer-table-expanded';
-                table.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th style="width: 80px;">志愿号</th>
-                            <th style="width: 200px;">学校名称</th>
-                            <th style="width: 100px;">区域</th>
-                            <th style="width: 80px;">风险</th>
-                            <th style="width: 90px;">概率</th>
-                            <th style="width: 70px;">分差</th>
-                            <th>📊 历年分数线 (2021-2025)</th>
-                            <th style="width: 100px;">👥 2025招生</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${plan.volunteers.map(vol => {
-                            const histData = vol.historical_data || {};
-                            const scores = (histData.scores || []).sort((a, b) => b.year - a.year);  // 按年份降序排列，2025在最左边
-                            const enrollment2025 = histData.enrollment_2025;
-                            
-                            // 构建分数线时间轴HTML
-                            let scoreTimelineHtml = '<div class="inline-score-timeline">';
-                            if (scores.length > 0) {
-                                scores.forEach(s => {
-                                    const rankText = s.last_volunteer_rank ? `(${s.last_volunteer_rank})` : '';
-                                    scoreTimelineHtml += `
-                                        <div class="inline-score-item" title="${s.year}年: ${s.score.toFixed(1)}分${s.last_volunteer_rank ? ', 末位志愿:' + s.last_volunteer_rank : ''}">
-                                            <span class="inline-year">${s.year}</span>
-                                            <span class="inline-score">${s.score.toFixed(0)}${rankText}</span>
-                                        </div>
-                                    `;
-                                });
-                            } else {
-                                scoreTimelineHtml += '<span class="no-data">暂无数据</span>';
-                            }
-                            scoreTimelineHtml += '</div>';
-                            
-                            // 招生人数HTML
-                            const enrollmentHtml = enrollment2025 !== null && enrollment2025 !== undefined 
-                                ? `<span class="enrollment-badge">${enrollment2025}人</span>`
-                                : '<span class="no-data">-</span>';
-                            
-                            return `
-                                <tr>
-                                    <td><strong>第${vol.volunteer_number}志愿</strong></td>
-                                    <td>${vol.school_info.school_name}</td>
-                                    <td>${vol.school_info.district}</td>
-                                    <td>
-                                        <span class="risk-badge risk-${vol.risk_level}">
-                                            ${vol.risk_level}
-                                        </span>
-                                    </td>
-                                    <td>${(vol.admission_probability * 100).toFixed(1)}%</td>
-                                    <td>${vol.estimated_score_gap > 0 ? '+' : ''}${vol.estimated_score_gap.toFixed(1)}</td>
-                                    <td>${scoreTimelineHtml}</td>
-                                    <td>${enrollmentHtml}</td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
+                // Display volunteer plan with multiple candidates per position (Principle 11)
+                const volunteers = plan.volunteers || [];
+                const allCandidates = plan.all_candidates || [];
+                
+                let tableHTML = `
+                    <table class="volunteer-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 80px;">志愿</th>
+                                <th>学校名称</th>
+                                <th style="width: 100px;">区域</th>
+                                <th style="width: 80px;">风险</th>
+                                <th style="width: 90px;">概率</th>
+                                <th style="width: 70px;">分差</th>
+                                <th>📊 历年分数线 (2021-2025)</th>
+                                <th style="width: 100px;">👥 2025招生</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                 `;
-                planCard.appendChild(table);
-
+                
+                // If all_candidates is available, show primary + alternatives for each position
+                if (allCandidates.length > 0) {
+                    allCandidates.forEach(posCandidate => {
+                        const primary = posCandidate.recommended_school;
+                        const alternatives = posCandidate.alternative_schools || [];
+                        
+                        // Render primary recommendation
+                        tableHTML += renderVolunteerRow(primary, true);
+                        
+                        // Render alternative schools with indent
+                        alternatives.forEach(alt => {
+                            tableHTML += renderVolunteerRow(alt, false);
+                        });
+                    });
+                } else {
+                    // Fallback to old format if all_candidates not available
+                    volunteers.forEach(vol => {
+                        tableHTML += renderVolunteerRow(vol, true);
+                    });
+                }
+                
+                tableHTML += `
+                        </tbody>
+                    </table>
+                `;
+                
+                planCard.innerHTML += tableHTML;
                 container.appendChild(planCard);
             });
+        }
+        
+        // Helper function to render a volunteer row
+        function renderVolunteerRow(vol, isPrimary) {
+            const histData = vol.historical_data || {};
+            const scores = (histData.scores || []).sort((a, b) => b.year - a.year);
+            const enrollment2025 = histData.enrollment_2025;
+            
+            // Build score timeline HTML
+            let scoreTimelineHtml = '<div class="inline-score-timeline">';
+            if (scores.length > 0) {
+                scores.forEach(s => {
+                    const rankText = s.last_volunteer_rank ? `(${s.last_volunteer_rank})` : '';
+                    scoreTimelineHtml += `
+                        <div class="inline-score-item" title="${s.year}年: ${s.score.toFixed(1)}分${s.last_volunteer_rank ? ', 末位志愿:' + s.last_volunteer_rank : ''}">
+                            <span class="inline-year">${s.year}</span>
+                            <span class="inline-score">${s.score.toFixed(0)}${rankText}</span>
+                        </div>
+                    `;
+                });
+            } else {
+                scoreTimelineHtml += '<span class="no-data">暂无数据</span>';
+            }
+            scoreTimelineHtml += '</div>';
+            
+            // Enrollment HTML
+            const enrollmentHtml = enrollment2025 !== null && enrollment2025 !== undefined 
+                ? `<span class="enrollment-badge">${enrollment2025}人</span>`
+                : '<span class="no-data">-</span>';
+            
+            // Style for alternative schools (indented with lighter background)
+            const rowClass = isPrimary ? '' : 'style="background-color: #f8f9fa;"';
+            const schoolNamePrefix = isPrimary ? '' : '<span style="color: #6c757d; margin-right: 5px;">↳</span>';
+            const volunteerLabel = isPrimary ? `<strong>第${vol.volunteer_number}志愿</strong>` : '<em style="color: #6c757d;">备选</em>';
+            
+            return `
+                <tr ${rowClass}>
+                    <td>${volunteerLabel}</td>
+                    <td>${schoolNamePrefix}${vol.school_info.school_name}</td>
+                    <td>${vol.school_info.district}</td>
+                    <td>
+                        <span class="risk-badge risk-${vol.risk_level}">
+                            ${vol.risk_level}
+                        </span>
+                    </td>
+                    <td>${(vol.admission_probability * 100).toFixed(1)}%</td>
+                    <td>${vol.estimated_score_gap > 0 ? '+' : ''}${vol.estimated_score_gap.toFixed(1)}</td>
+                    <td>${scoreTimelineHtml}</td>
+                    <td>${enrollmentHtml}</td>
+                </tr>
+            `;
         }
 
         function showLoading(show) {

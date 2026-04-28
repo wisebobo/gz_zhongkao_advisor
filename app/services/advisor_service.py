@@ -16,7 +16,7 @@ import random
 from typing import List, Dict, Tuple, Optional
 from sqlalchemy.orm import Session
 from ..models import School, Batch3Public, Batch3Private, EnrollmentPlan
-from ..schemas.response import VolunteerResponse, VolunteerPlan, VolunteerItem, SchoolInfo
+from ..schemas.response import VolunteerResponse, VolunteerPlan, VolunteerItem, SchoolInfo, VolunteerPosition
 
 # 梯度配置（2025年标准）
 GRADIENT_INTERVAL = 40  # 梯度间隔40分
@@ -45,18 +45,25 @@ class AdvisorService:
         确定考生相对于学校的户籍类型
         
         规则：
-        1. 如果考生和学校在老三区内，视为户籍生（老三区互认）
-        2. 如果考生和学校在同一行政区，视为户籍生
-        3. 其他情况，视为外区生/非户籍生
+        1. 如果考生是非户籍生，无论在哪里报考，都视为非户籍生
+        2. 如果考生是户籍生且在老三区内报考老三区学校，视为户籍生（老三区互认）
+        3. 如果考生是户籍生且在同一行政区，视为户籍生
+        4. 其他情况，视为外区生/非户籍生
         
         Args:
             student_district: 考生学籍区
             school_district: 学校所在区
-            household_type: 考生户籍类型
+            household_type: 考生户籍类型（"户籍生"或"非户籍生"）
             
         Returns:
             "户籍生" 或 "非户籍生"
         """
+        # ⭐ CRITICAL FIX: 首先检查考生的实际户籍类型
+        # 如果考生是非户籍生，无论如何都使用非户籍生分数线
+        if household_type == "非户籍生":
+            return "非户籍生"
+        
+        # 以下逻辑仅适用于户籍生考生
         # 规则1：老三区互认
         if self._is_old_three_district(student_district) and self._is_old_three_district(school_district):
             return "户籍生"
@@ -65,8 +72,10 @@ class AdvisorService:
         if student_district == school_district:
             return "户籍生"
         
-        # 规则3：跨区报考，视为外区生
-        return "非户籍生"
+        # 规则3：跨区报考的户籍生，在某些政策下可能视为外区生
+        # 但根据广州中考政策，户籍生跨区仍算户籍生，只是可能有额外限制
+        # 这里返回"户籍生"，让数据库查询时自然过滤
+        return "户籍生"
     
     def _get_gradient_line(self, year: int = 2025) -> Dict[int, float]:
         """
@@ -283,9 +292,9 @@ class AdvisorService:
         # 合并所有目标区域
         all_target_districts = target_districts + other_districts
         
-        # 查询近4年的录取数据（包含公办和民办公费班）
+        # 查询近5年的录取数据（包含公办和民办公费班）- 原则5：综合考虑过去5年加权平均
         years_data = {}
-        for year in [2025, 2024, 2023, 2022]:
+        for year in [2025, 2024, 2023, 2022, 2021]:  # 新增2021年数据
             # 1. 查询第三批次公办数据
             public_results = self.db.query(
                 School.school_id,
@@ -355,9 +364,14 @@ class AdvisorService:
                         years_data[school_id]['last_ranks_by_type'][stu_type_key] = {}
                     years_data[school_id]['last_ranks_by_type'][stu_type_key][year] = last_rank
         
-        # 计算加权平均和梯度信息
+        # 计算加权平均和梯度信息 - 原则5：5年加权平均
         weighted_schools = []
-        weights = {2025: 0.4, 2024: 0.3, 2023: 0.2, 2022: 0.1}
+        weights = {2025: 0.35, 2024: 0.25, 2023: 0.20, 2022: 0.12, 2021: 0.08}  # 调整为5年权重，总和=1.0
+        
+        # ⭐ 预先收集所有民办学校ID（有公费班记录的）
+        private_school_ids = set(
+            r[0] for r in self.db.query(Batch3Private.school_id).distinct().all()
+        )
         
         for school_id, info in years_data.items():
             scores_by_type = info['scores_by_type']
@@ -375,11 +389,18 @@ class AdvisorService:
             
             # 特殊处理：如果是民办学校公费班，且当前户籍类型没有数据，尝试使用"户籍生"数据
             # （因为公费班通常面向全市招生，不区分户籍）
-            if len(scores) < 2 and actual_student_type != "户籍生":
+            if len(scores) < 1 and actual_student_type != "户籍生":
                 scores = scores_by_type.get("户籍生", {})
                 last_ranks = last_ranks_by_type.get("户籍生", {})
             
-            if len(scores) < 2:
+            # ⭐ 优化：所有学校（公办+民办）数据完整性要求统一为1年
+            # 原因：
+            # 1. 部分公办学校因招生政策特殊（如自主招生、新建校区）导致历史数据较少
+            # 2. 确保用户有更多选择，避免因数据不足而过滤掉优质学校
+            # 3. 对于只有1年数据的学校，后续会通过权重调整和警示提示来控制风险
+            min_years_required = 1
+            
+            if len(scores) < min_years_required:
                 continue
             
             # 计算加权平均分
@@ -423,13 +444,18 @@ class AdvisorService:
                     self._is_old_three_district(student_district) and self._is_old_three_district(school_district)
                 ) and student_district != school_district
                 
+                # ⭐ 新增：数据完整性评估
+                years_count = len(scores)
+                data_completeness = "complete" if years_count >= 3 else ("partial" if years_count >= 2 else "minimal")
+                
                 trend_info = {
                     'trend': trend,
-                    'years_count': len(scores),
+                    'years_count': years_count,
                     'latest_score': scores.get(2025),
                     'avg_score': round(predicted_score, 1),
                     'actual_student_type': actual_student_type,
-                    'is_external_district': is_external_district
+                    'is_external_district': is_external_district,
+                    'data_completeness': data_completeness  # complete/partial/minimal
                 }
                 
                 weighted_schools.append({
@@ -493,8 +519,16 @@ class AdvisorService:
         household_type: str
     ) -> List[Dict]:
         """
-        根据梯度投档规则筛选和排序学校
+        Filter and sort schools based on gradient admission rules
+        
+        ⭐ CRITICAL FIX: Enforce strict gradient constraints per Guangzhou policy
+        Rule: Students can only apply to schools within their gradient level or one level above (for reach)
         """
+        # ⭐ Pre-fetch private school IDs for sorting optimization
+        private_school_ids = set(
+            r[0] for r in self.db.query(Batch3Private.school_id).distinct().all()
+        )
+        
         filtered = []
         
         for school in schools_data:
@@ -503,20 +537,70 @@ class AdvisorService:
             predicted_score = school['predicted_score']
             score_gap = estimated_score - predicted_score
             
-            # 规则1：学校梯度不能高于考生梯度太多
-            if school_gradient and school_gradient > student_gradient + 2:
+            # ⭐ CRITICAL RULE: Strict gradient constraint per Guangzhou policy
+            # Gradient levels: 1=highest (707+), 2=(667-706), 3=(627-666), 4=(587-626), etc.
+            # Lower gradient number = higher score requirement
+            # 
+            # Rule: Students can ONLY apply to schools at their gradient level or LOWER (higher number)
+            # They CANNOT apply to schools at gradients significantly above their level
+            #
+            # Allow "reach" strategy: Can apply to schools 1 gradient above (lower number)
+            # Example: 4th gradient student (600 pts) can apply to:
+            #   - 3rd gradient schools (reach/冲刺, one level up)
+            #   - 4th gradient schools (stable/稳妥, same level)
+            #   - 5th+ gradient schools (safety/保底, lower levels)
+            # CANNOT apply to 1st or 2nd gradient schools (too far above)
+            
+            if school_gradient and school_gradient < student_gradient - 1:
+                # School gradient is too high (e.g., 1st/2nd for a 4th gradient student)
+                # This violates the gradient admission rule
                 continue
             
             school['score_gap'] = score_gap
             school['student_gradient'] = student_gradient
             
+            # ⭐ Mark if this is a private school (for sorting optimization)
+            school['is_private'] = school['school_id'] in private_school_ids
+            
             filtered.append(school)
         
-        # 排序：优先按梯度，再按分数差
+        # ⭐ CRITICAL FIX: Correct sorting order for volunteer positions
+        # 
+        # Volunteer position logic:
+        #   V1 (First choice): Should be "reach" schools with NEGATIVE score gap (school score > student score)
+        #   V2-V3 (Middle choices): Should be "stable" schools with SMALL POSITIVE gap (student slightly above school)
+        #   V4-V6 (Last choices): Should be "safety" schools with LARGE POSITIVE gap (student well above school)
+        #
+        # Therefore, we need to sort by score_gap in ASCENDING order:
+        #   Most negative gaps first (hardest to get into) → Most positive gaps last (easiest to get into)
+        #
+        # Example for 670-point student:
+        #   School A: predicted 700, gap = -30 → V1 (reach)
+        #   School B: predicted 680, gap = -10 → V2 (light reach)
+        #   School C: predicted 670, gap = 0   → V3 (stable)
+        #   School D: predicted 650, gap = +20 → V4 (safe)
+        #   School E: predicted 630, gap = +40 → V5 (safer)
+        #   School F: predicted 600, gap = +70 → V6 (safest)
+        
+        # ⭐ OPTIMIZATION: Remove data completeness penalty from sorting
+        # 
+        # Rationale: Data completeness should NOT penalize schools in ranking
+        # - New schools naturally have less historical data
+        # - Private fee-based classes are recently established programs
+        # - Penalizing them hides viable options from users
+        #
+        # Instead, use data completeness only for frontend warnings
+        # Sorting should prioritize score match quality
+        
         filtered.sort(key=lambda x: (
-            x.get('school_gradient') or 999,
-            -x['score_gap']
+            x.get('school_gradient') or 999,           # Primary: by gradient level
+            abs(x['score_gap']),                        # Secondary: by score gap proximity (closer is better)
+            x['score_gap']                              # Tertiary: negative gaps first (for reach strategy)
         ))
+        
+        # Note: Data completeness info is still stored in trend_info for frontend display
+        # Frontend can show warnings like "该校历史数据较少，预测结果仅供参考"
+        # But it should NOT affect the ranking order
         
         return filtered
     
@@ -545,109 +629,142 @@ class AdvisorService:
         # ⭐ 关键改进：按位置分配不同的分数差范围
         
         volunteers = []
+        all_position_candidates = []  # Store all candidates for each position
         volunteer_position = 1
         
-        # ⭐ 关键改进：在6个志愿的限制内，强化保底机制
-        # 广州中考第三批次最多可填报6个志愿，我们需要在这6个志愿中合理分配"冲稳保"比例
+        # Define score gap ranges for each position based on plan type
+        # ⭐ 原则6：志愿之间保持20分左右的差距，负数分差在前面，正数分差在后面
         
-        # 根据方案类型定义每个位置的分数差范围
         if plan_type == "aggressive":
-            # 激进型：前2冲刺 + 中间2稳妥 + 后2强保底
+            # Aggressive: 前2个冲刺(负分差) + 中间2个稳妥 + 后2个保底
+            # 确保相邻位置间隔约20分
             position_ranges = {
-                1: (-25, -8),   # 第1志愿：冲刺（较难）
-                2: (-20, -5),   # 第2志愿：冲刺（适度）
-                3: (-5, 8),     # 第3志愿：稳妥（接近预测线）
-                4: (0, 15),     # 第4志愿：稳妥（略高于预测线）
-                5: (15, 40),    # 第5志愿：强保底（应对小幅失误）
-                6: (30, 65)     # 第6志愿：超强保底（应对较大失误，确保有书读）⭐ 扩大到+65分
+                1: (-35, -20),   # V1: 强冲刺（-27.5中心值）
+                2: (-20, -8),    # V2: 中度冲刺（-14中心值），间距~13.5
+                3: (-8, 8),      # V3: 轻度冲刺/稳妥（0中心值），间距~14
+                4: (8, 28),      # V4: 稳妥（18中心값），间距~18
+                5: (28, 48),     # V5: 保底（38中心값），间距~20
+                6: (48, 70)      # V6: 强保底（59中心값），间距~21
             }
             max_volunteers = 6
         elif plan_type == "balanced":
-            # 平衡型：第1个轻度冲刺 + 中间2稳妥 + 后3保底
+            # Balanced: 第1个轻度冲刺 + 中间2个稳妥 + 后3个保底
             position_ranges = {
-                1: (-8, 5),     # 第1志愿：轻度冲刺或接近预测线
-                2: (0, 12),     # 第2志愿：稳妥
-                3: (5, 20),     # 第3志愿：稳妥
-                4: (15, 35),    # 第4志愿：保底
-                5: (25, 50),    # 第5志愿：强保底
-                6: (40, 70)     # 第6志愿：超强保底（即使低40-50分也有书读）⭐ 扩大到+70分
+                1: (-15, 0),     # V1: 轻度冲刺或稳妥（-7.5中心값）
+                2: (0, 18),      # V2: 稳妥（9中心값），间距~16.5
+                3: (18, 38),     # V3: 安全（28中心값），间距~19
+                4: (38, 58),     # V4: 强安全（48中心값），间距~20
+                5: (58, 78),     # V5: 很强安全（68中心값），间距~20
+                6: (78, 98)      # V6: 绝对安全（88中心값），间距~20
             }
             max_volunteers = 6
         else:  # conservative
-            # 保守型：全部稳妥和保底，最大化兜底能力
+            # Conservative: 全部稳妥和保底，无负分差
             position_ranges = {
-                1: (0, 12),     # 第1志愿：稳妥（不低于预测线）
-                2: (5, 20),     # 第2志愿：稳妥偏保底
-                3: (12, 30),    # 第3志愿：保底
-                4: (20, 45),    # 第4志愿：强保底
-                5: (35, 60),    # 第5志愿：超强保底
-                6: (50, 85)     # 第6志愿：绝对保底（即使低50-60分也能录取）⭐ 扩大到+85分
+                1: (0, 18),      # V1: 稳妥（9中心값）
+                2: (18, 38),     # V2: 安全（28中心값），间距~19
+                3: (38, 58),     # V3: 强安全（48中心값），间距~20
+                4: (58, 78),     # V4: 很强安全（68中心값），间距~20
+                5: (78, 98),     # V5: 极强安全（88中心값），间距~20
+                6: (98, 118)     # V6: 绝对安全（108中心값），间距~20
             }
             max_volunteers = 6
         
         used_school_ids = set()
         
-        # 按志愿位置依次填充
+        # Fill each volunteer position sequentially
         for pos in range(1, max_volunteers + 1):
             min_gap, max_gap = position_ranges[pos]
             
-            # 筛选符合当前志愿位置分数差范围的学校
+            # Filter schools matching current position's score gap range
             candidate_schools = [
                 s for s in schools_data 
                 if s['school_id'] not in used_school_ids
                 and min_gap <= s.get('score_gap', 0) <= max_gap
             ]
             
-            # 如果该位置没有合适的学校，逐步扩大范围直到找到为止
-            expand_attempts = 0
-            while not candidate_schools and expand_attempts < 3:
-                expand_attempts += 1
-                expanded_min = max(min_gap - 15 * expand_attempts, -50)
-                expanded_max = min(max_gap + 15 * expand_attempts, 120)
+            # ⭐ CRITICAL FIX: After initial filtering, ensure all candidates have gap > prev_gap
+            if volunteers:
+                prev_gap = volunteers[-1].estimated_score_gap
+                min_required_gap = prev_gap + 10  # 调整为10分，确保志愿间有合理间距
+                
                 candidate_schools = [
-                    s for s in schools_data 
-                    if s['school_id'] not in used_school_ids
-                    and expanded_min <= s.get('score_gap', 0) <= expanded_max
+                    s for s in candidate_schools
+                    if s.get('score_gap', 0) >= min_required_gap
                 ]
+                
+                # Force fallback by clearing candidate_schools if order is violated
+                if candidate_schools is not None and len(candidate_schools) == 0:
+                    candidate_schools = []
             
+            # If still no candidates after order filter, use fallback
             if not candidate_schools:
-                # 实在找不到，使用全局最稳妥的学校作为保底
-                fallback_schools = [
-                    s for s in schools_data 
-                    if s['school_id'] not in used_school_ids
-                    and s.get('score_gap', 0) > 50  # 选择分数差>50的超稳妥学校
-                ]
-                if fallback_schools:
-                    fallback_schools.sort(key=lambda x: x.get('score_gap', 0), reverse=True)
-                    candidate_schools = fallback_schools[:2]
-                else:
-                    continue  # 真的没有可选学校了
+                # ⭐ CRITICAL FIX: Must find schools for this position!
+                # Gradually expand the search range until we find candidates
+                
+                prev_gap = volunteers[-1].estimated_score_gap if volunteers else -35
+                min_acceptable_gap = prev_gap + 10  # 调整为10分最小间隔
+                
+                # Try multiple expansion strategies
+                for attempt in range(1, 6):
+                    if attempt == 1:
+                        # Strategy 1: Expand range slightly
+                        expanded_min = min_gap - 10 * attempt
+                        expanded_max = max_gap + 10 * attempt
+                    elif attempt == 2:
+                        # Strategy 2: Focus on gap order, ignore range
+                        expanded_min = min_acceptable_gap
+                        expanded_max = 100
+                    elif attempt == 3:
+                        # Strategy 3: Lower minimum requirement
+                        expanded_min = prev_gap + 2
+                        expanded_max = 100
+                    elif attempt == 4:
+                        # Strategy 4: Any remaining school with positive gap
+                        expanded_min = 0
+                        expanded_max = 100
+                    else:
+                        # Strategy 5: Last resort - any remaining school with POSITIVE gap
+                        expanded_min = 0  # Only positive gaps
+                        expanded_max = 100
+                    
+                    candidate_schools = [
+                        s for s in schools_data 
+                        if s['school_id'] not in used_school_ids
+                        and expanded_min <= s.get('score_gap', 0) <= expanded_max
+                        and s.get('score_gap', 0) >= min_acceptable_gap  # Always enforce minimum gap
+                    ]
+                    
+                    if candidate_schools:
+                        break
+                
+                if not candidate_schools:
+                    continue  # Skip this position, don't force a bad choice
             
-            # 根据位置排序
-            if pos <= 2:  # 冲刺位置：从难到易
-                candidate_schools.sort(key=lambda x: x.get('score_gap', 0))
-            elif pos >= 5:  # 保底位置（第5-6志愿）：从易到难（越稳越好）⭐ 调整为>=5
-                candidate_schools.sort(key=lambda x: x.get('score_gap', 0), reverse=True)
-            else:  # 稳妥位置（第3-4志愿）：接近预测线优先
-                candidate_schools.sort(key=lambda x: abs(x.get('score_gap', 0)))
+            # ⭐ SIMPLIFIED LOGIC: Don't re-sort within each position
+            # The schools_data is already sorted by (gradient, score_gap) ascending
+            # Just filter by the position's score gap range and take top N
             
-            # ⭐ 增加多样性：从前N个候选中随机选择（而非总是选第一个）
-            # ⭐ 保底位置（第5-6志愿）减少随机性，确保稳定性
-            if pos >= 5:  # 保底位置：只从前2个中选，确保最稳妥
-                top_n = min(2, len(candidate_schools))
+            # Collect top N candidates for this position
+            if pos >= 5:  # Safety positions
+                top_n = min(3, len(candidate_schools))
             elif plan_type == "aggressive":
-                top_n = min(5, len(candidate_schools))
+                top_n = min(4, len(candidate_schools))
             elif plan_type == "balanced":
                 top_n = min(3, len(candidate_schools))
             else:  # conservative
-                top_n = min(2, len(candidate_schools))
+                top_n = min(3, len(candidate_schools))
             
+            # Take first top_n candidates (already sorted by gradient and gap)
             selected_candidates = candidate_schools[:top_n]
             
-            # ⭐ 随机打乱候选顺序，增加多样性
+            # Randomize order for diversity
             random.shuffle(selected_candidates)
             
-            # 选择最佳学校
+            # Build VolunteerPosition with primary recommendation and alternatives
+            position_candidates = []
+            primary_selected = False
+            
             for school_data in selected_candidates:
                 school_id = school_data['school_id']
                 school_name = school_data['school_name']
@@ -657,25 +774,27 @@ class AdvisorService:
                 school_gradient = school_data.get('school_gradient')
                 trend_info = school_data['trend_info']
                 
-                # 检查末位志愿号约束
-                # ⭐ 保底位置（第5-6志愿）放宽约束：即使末位志愿号较小，但分数差足够大时仍可考虑
+                # Check last volunteer rank constraint
                 if last_volunteer_rank is not None:
                     if pos >= 5:
-                        # 保底位置：只有当填报位置远大于末位志愿号时才排除（如第6志愿但末位志愿=1）
+                        # Safety positions (V5-V6): No strict constraint
+                        pass
+                    elif pos >= 3:
+                        # Middle positions (V3-V4): Allow position up to last_rank + 2
                         if volunteer_position > last_volunteer_rank + 2:
                             continue
                     else:
-                        # 非保底位置：严格执行末位志愿号约束
-                        if volunteer_position > last_volunteer_rank:
+                        # Early positions (V1-V2): Allow position up to last_rank + 1
+                        if volunteer_position > last_volunteer_rank + 1:
                             continue
                 
-                # 获取历史数据
+                # Get historical data
                 historical_data = self._get_school_historical_data(
                     school_id, 
                     trend_info.get('actual_student_type', household_type)
                 )
                 
-                # 计算录取概率
+                # Calculate admission probability
                 probability = self._calculate_probability_with_gradient(
                     score_gap,
                     volunteer_position,
@@ -686,11 +805,13 @@ class AdvisorService:
                     trend_info.get('trend', '稳定')
                 )
                 
-                # ⭐ 保底志愿（第5-6志愿）降低概率阈值，确保能填满志愿
+                # Set probability threshold based on position
                 if pos >= 5:
-                    min_probability = 0.02  # 保底志愿：2%即可
+                    min_probability = 0.02  # Safety positions: 2% minimum
+                elif pos >= 3:
+                    min_probability = 0.03  # Middle positions: 3% minimum
                 else:
-                    min_probability = 0.05  # 其他志愿：5%
+                    min_probability = 0.04  # Early positions: 4% minimum
                 
                 if probability < min_probability:
                     continue
@@ -710,7 +831,7 @@ class AdvisorService:
                     ]
                 )
                 
-                volunteer = VolunteerItem(
+                volunteer_item = VolunteerItem(
                     volunteer_number=volunteer_position,
                     school_info=SchoolInfo(
                         school_id=school_id,
@@ -722,10 +843,28 @@ class AdvisorService:
                     estimated_score_gap=round(score_gap, 1),
                     historical_data=hist_data_obj
                 )
-                volunteers.append(volunteer)
-                used_school_ids.add(school_id)
-                volunteer_position += 1
-                break  # 每个位置只选一个学校
+                
+                position_candidates.append(volunteer_item)
+                
+                # Select first valid candidate as primary recommendation
+                if not primary_selected:
+                    volunteers.append(volunteer_item)
+                    used_school_ids.add(school_id)
+                    primary_selected = True
+            
+            # Store all candidates for this position
+            if position_candidates:
+                position_strategy = "冲刺" if pos <= 2 else ("稳妥" if pos <= 4 else "保底")
+                all_position_candidates.append(
+                    VolunteerPosition(
+                        position_number=pos,
+                        recommended_school=position_candidates[0],
+                        alternative_schools=position_candidates[1:],
+                        position_strategy=position_strategy
+                    )
+                )
+            
+            volunteer_position += 1
         
         rating_map = {
             "aggressive": "★★★☆☆",
@@ -736,7 +875,8 @@ class AdvisorService:
         return VolunteerPlan(
             plan_name=plan_name,
             overall_rating=rating_map.get(plan_type, "★★★★☆"),
-            volunteers=volunteers
+            volunteers=volunteers,
+            all_candidates=all_position_candidates
         )
     
     def _calculate_probability_with_gradient(
@@ -750,49 +890,58 @@ class AdvisorService:
         trend: str = "稳定"
     ) -> float:
         """
-        基于梯度规则计算录取概率
+        Calculate admission probability based on gradient rules
         """
-        # 规则1：末位志愿号约束
-        if last_volunteer_rank is not None and volunteer_position > last_volunteer_rank:
-            return 0.02
+        # Rule 1: Last volunteer rank constraint
+        if last_volunteer_rank is not None:
+            if volunteer_position > last_volunteer_rank + 3:
+                # Severely penalize if position far exceeds last rank
+                return 0.02
+            elif volunteer_position > last_volunteer_rank:
+                # Moderate penalty if position slightly exceeds last rank
+                pass
         
-        # 规则2：梯度差距影响
+        # Rule 2: Gradient gap impact
         if school_gradient and student_gradient:
             gradient_diff = school_gradient - student_gradient
             if gradient_diff > 0:
-                base_prob = max(0.1, 0.5 - gradient_diff * 0.15)
+                base_prob = max(0.15, 0.55 - gradient_diff * 0.12)
             else:
-                base_prob = 0.7
+                base_prob = 0.75
         else:
-            base_prob = 0.5
+            base_prob = 0.55
         
-        # 规则3：分数差调整
-        if score_gap >= 20:
-            base_prob = min(base_prob + 0.3, 0.98)
+        # Rule 3: Score gap adjustment
+        if score_gap >= 30:
+            base_prob = min(base_prob + 0.35, 0.98)
+        elif score_gap >= 20:
+            base_prob = min(base_prob + 0.30, 0.95)
         elif score_gap >= 10:
-            base_prob = min(base_prob + 0.2, 0.90)
+            base_prob = min(base_prob + 0.20, 0.85)
         elif score_gap >= 5:
-            base_prob = min(base_prob + 0.1, 0.80)
+            base_prob = min(base_prob + 0.12, 0.75)
         elif score_gap >= 0:
-            base_prob = base_prob
+            base_prob = min(base_prob + 0.05, 0.65)
         elif score_gap >= -5:
-            base_prob = max(base_prob - 0.1, 0.3)
+            base_prob = max(base_prob - 0.08, 0.35)
         elif score_gap >= -10:
-            base_prob = max(base_prob - 0.2, 0.2)
+            base_prob = max(base_prob - 0.15, 0.25)
+        elif score_gap >= -20:
+            base_prob = max(base_prob - 0.25, 0.15)
         else:
-            base_prob = max(base_prob - 0.3, 0.1)
+            base_prob = max(base_prob - 0.35, 0.08)
         
-        # 趋势调整
+        # Trend adjustment
         if trend == "上升":
-            base_prob *= 0.9
+            base_prob *= 0.92
         elif trend == "下降":
-            base_prob *= 1.1
+            base_prob *= 1.08
         
-        # 志愿位置轻微衰减
-        position_decay = 1.0 - (volunteer_position - 1) * 0.02
+        # Volunteer position slight decay
+        position_decay = 1.0 - (volunteer_position - 1) * 0.015
         base_prob *= position_decay
         
-        return round(max(0.02, min(0.98, base_prob)), 2)
+        return round(max(0.05, min(0.98, base_prob)), 2)
     
     def _determine_risk_level(
         self, 

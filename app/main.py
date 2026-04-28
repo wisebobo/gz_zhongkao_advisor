@@ -43,8 +43,9 @@ app.add_middleware(
 
 # 挂载静态文件
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-if os.path.exists(frontend_dir):
-    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+static_dir = os.path.join(frontend_dir, "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -93,6 +94,24 @@ async def generate_volunteer_plans(
 async def get_districts():
     """获取学籍区列表（只包含行政区）"""
     return {"districts": DISTRICTS}
+
+@app.get("/api/v1/config/historical-districts")
+async def get_historical_districts(db: Session = Depends(get_db)):
+    """
+    获取历史数据查询可用的区域列表（包含省市属）
+    
+    从数据库中动态获取所有存在的区域值，包括：
+    - 11个行政区
+    - 省市属
+    """
+    # 从School表中查询所有不同的区域值
+    districts = db.query(School.district).distinct().all()
+    district_list = sorted([d[0] for d in districts if d[0]])
+    
+    return {
+        "districts": district_list,
+        "total": len(district_list)
+    }
 
 @app.get("/api/v1/config/household_types")
 async def get_household_types():
@@ -221,32 +240,34 @@ async def get_batch4_historical_data(
     return {"success": True, "data": data, "count": len(data)}
 
 @app.get("/api/v1/historical/schools")
-async def get_schools(
-    batch: str = Query("batch3", description="批次"),
+async def get_schools_with_data(
+    batch: str = Query("batch3", description="批次：batch3或batch4"),
     district: Optional[str] = Query(None, description="区域"),
     db: Session = Depends(get_db)
 ):
-    """获取学校列表"""
+    """
+    获取有历年数据的学校列表
+    
+    优化：使用JOIN替代子查询，提升查询性能
+    """
     # 根据批次选择数据表
-    if batch == "batch3":
-        Model = Batch3Public
-    else:
-        Model = Batch4Public
+    Model = Batch3Public if batch == "batch3" else Batch4Public
     
-    # 查询有数据的学校ID
-    schools_with_data = db.query(Model.school_id).distinct().subquery()
+    # 使用JOIN直接关联查询，避免子查询的性能问题
+    query = db.query(School).join(
+        Model, School.school_id == Model.school_id
+    ).distinct()
     
-    # 查询学校信息
-    query = db.query(School).filter(
-        School.school_id.in_(schools_with_data)
-    )
-    
+    # 如果指定了区域，添加过滤条件
     if district:
         query = query.filter(School.district == district)
     
+    # 执行查询
     schools = query.all()
     
+    # 构建响应数据
     return {
+        "success": True,
         "schools": [
             {
                 "school_id": s.school_id,

@@ -383,7 +383,8 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 使用本地Chart.js文件，避免CDN加载延迟 -->
+    <script src="/static/js/chart.min.js"></script>
     <script>
         let currentData = [];
         let trendChart = null;
@@ -396,10 +397,10 @@
             loadSchools();
         };
 
-        // 加载区域列表
+        // 加载区域列表（历史数据查询专用，包含省市属）
         async function loadDistricts() {
             try {
-                const response = await fetch('/api/v1/config/districts');
+                const response = await fetch('/api/v1/config/historical-districts');
                 const data = await response.json();
                 
                 const districtSelect = document.getElementById('district-select');
@@ -411,6 +412,7 @@
                 });
                 
                 console.log('✅ 区域列表加载完成:', data.districts.length, '个区域');
+                console.log('区域列表:', data.districts);
             } catch (error) {
                 console.error('❌ 加载区域列表失败:', error);
             }
