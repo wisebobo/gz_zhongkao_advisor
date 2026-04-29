@@ -830,8 +830,7 @@ class AdvisorService:
                 if probability < min_probability:
                     continue
                 
-                risk_level = self._determine_risk_level(score_gap, student_gradient, school_gradient)
-                
+                risk_level = self._determine_risk_level(probability, score_gap)
                 from ..schemas.response import HistoricalData, ScoreHistory
                 hist_data_obj = HistoricalData(
                     enrollment_2025=historical_data.get('enrollment_2025'),
@@ -1090,22 +1089,26 @@ class AdvisorService:
     
     def _determine_risk_level(
         self, 
-        score_gap: float, 
-        student_gradient: int,
-        school_gradient: Optional[int]
+        probability: float,
+        score_gap: Optional[float] = None
     ) -> str:
-        """确定风险等级"""
-        # 主要基于分数差判断
-        if score_gap < -10:
-            return "冲刺"  # 远低于预测分数线（需要大幅冲刺）
-        elif -10 <= score_gap < 0:
-            return "冲刺"  # 略低于预测分数线（需要适度冲刺）
-        elif 0 <= score_gap <= 15:
-            return "稳妥"  # 接近或略高于预测分数线（较稳妥）
-        elif 15 < score_gap <= 30:
-            return "保底"  # 明显高于预测分数线（安全保底）
-        else:  # score_gap > 30
-            return "保底"  # 远高于预测分数线（强保底）
+        """
+        确定风险等级
+        
+        Args:
+            probability: 录取概率（0-1之间）
+            score_gap: 分数差（仅用于辅助判断，已废弃）
+        
+        Returns:
+            风险等级：冲刺/稳妥/保底
+        """
+        # ⭐ 核心原则：风险等级主要基于录取概率
+        if probability < 0.50:
+            return "冲刺"  # 概率<50%，风险高，需要冲刺
+        elif probability < 0.80:
+            return "稳妥"  # 概率50%-80%，相对稳妥
+        else:
+            return "保底"  # 概率≥80%，安全保底
     
     def _get_school_historical_data(
         self,
