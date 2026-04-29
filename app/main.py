@@ -180,6 +180,64 @@ async def get_batch3_historical_data(
     
     return {"success": True, "data": data, "count": len(data)}
 
+@app.get("/api/v1/historical/batch3-aggregated")
+async def get_batch3_historical_data_aggregated(
+    district: Optional[str] = Query(None, description="区域"),
+    school_name: Optional[str] = Query(None, description="学校名称"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取第三批次历年录取数据（按学校聚合）
+    
+    返回格式：每个学校一行，包含多年的分数线数据
+    """
+    # 查询所有有数据的学校
+    query = db.query(School).join(
+        Batch3Public, School.school_id == Batch3Public.school_id
+    ).distinct()
+    
+    if district:
+        query = query.filter(School.district == district)
+    
+    if school_name:
+        query = query.filter(School.school_name.like(f"%{school_name}%"))
+    
+    schools = query.all()
+    
+    # 为每个学校聚合多年数据
+    aggregated_data = []
+    for school in schools:
+        school_record = {
+            "school_id": school.school_id,
+            "school_name": school.school_name,
+            "district": school.district,
+            "years": {}
+        }
+        
+        # 查询该学校的所有年份数据
+        records = db.query(Batch3Public).filter(
+            Batch3Public.school_id == school.school_id
+        ).all()
+        
+        for record in records:
+            year_key = str(record.year)
+            if year_key not in school_record["years"]:
+                school_record["years"][year_key] = {}
+            
+            # 存储不同学生类型的数据
+            student_type = record.student_type
+            school_record["years"][year_key][student_type] = {
+                "min_score": record.min_score,
+                "last_volunteer_rank": record.last_volunteer_rank
+            }
+        
+        aggregated_data.append(school_record)
+    
+    # 按学校名称排序
+    aggregated_data.sort(key=lambda x: x["school_name"])
+    
+    return {"success": True, "data": aggregated_data, "count": len(aggregated_data)}
+
 @app.get("/api/v1/historical/batch4")
 async def get_batch4_historical_data(
     school_id: Optional[int] = Query(None, description="学校ID"),

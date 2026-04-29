@@ -100,13 +100,26 @@ class AdvisorService:
             
         Returns:
             梯度等级（1=第一梯度，2=第二梯度...）
+            
+        Note:
+            梯度线含义：
+            - 第1梯度线: 707分 (>=707为第1梯度)
+            - 第2梯度线: 667分 (667-706为第2梯度)
+            - 第3梯度线: 627分 (627-666为第3梯度)
+            - ...
         """
         gradients = self._get_gradient_line(year)
         
-        for gradient_level in sorted(gradients.keys()):
+        # ⭐ CORRECTED: 从第1梯度开始检查，找到第一个满足条件的
+        # 例如660分：
+        #   检查第1梯度(707): 660 >= 707? No
+        #   检查第2梯度(667): 660 >= 667? No
+        #   检查第3梯度(627): 660 >= 627? Yes → 返回3
+        for gradient_level in sorted(gradients.keys()):  # 从1到10
             if score >= gradients[gradient_level]:
                 return gradient_level
         
+        # 如果分数低于所有梯度线，返回最低梯度+1
         return len(gradients) + 1
     
     def _determine_school_gradient(
@@ -906,26 +919,59 @@ class AdvisorService:
         4. 同分情况 → 末位志愿号才有意义
         """
         
-        # Rule 1: Last volunteer rank constraint - ⭐ ONLY applies when score gap is small
-        # 末位志愿号只在分数接近时才有意义，分差大时完全无效
+        # Rule 1: Last volunteer rank constraint - ⭐ CRITICAL distinction between same/cross gradient
+        # 末位志愿号的约束力取决于是否在同一梯度内竞争
         last_rank_penalty = 1.0  # Default: no penalty
         
-        if last_volunteer_rank is not None and abs(score_gap) <= 10:
-            # 只有在分差≤10分时，末位志愿号才可能有影响
-            # 因为此时可能进入同分比较环节
-            if volunteer_position > last_volunteer_rank:
-                excess = volunteer_position - last_volunteer_rank
+        if last_volunteer_rank is not None and school_gradient and student_gradient:
+            gradient_diff = abs(school_gradient - student_gradient)
+            
+            if gradient_diff == 0:
+                # ⚠️ 同梯度：严格遵循"志愿优先"原则
+                # 此时所有考生在同一分数线段竞争，志愿顺序决定录取
+                if volunteer_position > last_volunteer_rank:
+                    excess = volunteer_position - last_volunteer_rank
+                    
+                    if last_volunteer_rank == 1 and excess >= 1:
+                        # 末位志愿号=1，放在V2+：几乎不可能录取
+                        # 因为该校在同梯度第1志愿就录满了
+                        last_rank_penalty = 0.05
+                    elif excess <= 2:
+                        # 轻微超出：大幅惩罚
+                        last_rank_penalty = 0.30
+                    elif excess <= 4:
+                        # 中度超出：严重惩罚
+                        last_rank_penalty = 0.15
+                    else:
+                        # 严重超出：极严重惩罚
+                        last_rank_penalty = 0.08
+            
+            elif gradient_diff >= 1:
+                # ✅ 跨梯度：遵循"梯度优先"原则
+                # 高分考生优先录取，末位志愿号约束大幅减弱
+                # 
+                # 原因：
+                # 1. 第3梯度考生报考第4/5梯度学校时，分数远高于该校线
+                # 2. 即使该校在同梯度末位志愿号=1，高分考生仍可在后续志愿被录取
+                # 3. 此时分差优势已经体现了梯度差异，不应再受末位志愿号限制
                 
-                if excess <= 2:
-                    # 轻微超出：小幅惩罚
-                    last_rank_penalty = 0.95
-                elif excess <= 4:
-                    # 中度超出：中等惩罚
-                    last_rank_penalty = 0.85
-                else:
-                    # 严重超出：较大惩罚（但仍不是极端值）
-                    last_rank_penalty = 0.70
-            # 注意：如果分差>10分，完全不应用末位志愿号惩罚
+                if volunteer_position > last_volunteer_rank:
+                    # 跨梯度场景：根据跨越的梯度数量决定惩罚程度
+                    excess = volunteer_position - last_volunteer_rank
+                    
+                    if gradient_diff >= 2:
+                        # ⭐ 跨2个及以上梯度：几乎不惩罚
+                        # 高分考生的梯度优势足以弥补志愿位置的劣势
+                        last_rank_penalty = 0.98
+                    elif gradient_diff == 1:
+                        # 跨1个梯度：轻微惩罚
+                        if excess <= 2:
+                            last_rank_penalty = 0.92
+                        elif excess <= 4:
+                            last_rank_penalty = 0.85
+                        else:
+                            last_rank_penalty = 0.78
+                # 注意：如果志愿位置<=末位志愿号，完全不惩罚（last_rank_penalty保持1.0）
         
         # Rule 2: Gradient gap impact (PRIMARY FACTOR)
         # ⭐ FIXED: Only apply gradient penalty when score gap is small
