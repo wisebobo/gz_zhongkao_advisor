@@ -651,14 +651,15 @@ class AdvisorService:
         
         if plan_type == "aggressive":
             # Aggressive: 前2个冲刺(负分差) + 中间2个稳妥 + 后2个保底
-            # 确保相邻位置间隔约20分
+            # ⭐ 关键改进：确保相邻志愿有足够分差间隔（至少15分）
+            # ⭐ 新增：V3-V4必须选择概率≥50%的学校，严禁冲刺
             position_ranges = {
                 1: (-35, -20),   # V1: 强冲刺（-27.5中心值）
                 2: (-18, -5),    # V2: 中度冲刺（-11.5中心值），与V1间隔至少15分
-                3: (0, 15),      # V3: 轻度冲刺/稳妥（7.5中心值），与V2间隔至少15分
-                4: (18, 35),     # V4: 稳妥（26.5中心값），与V3间隔至少15分
-                5: (38, 55),     # V5: 保底（46.5中心값），与V4间隔至少15分
-                6: (58, 75)      # V6: 强保底（66.5中心값），与V5间隔至少15分
+                3: (5, 25),      # V3: 稳妥（15中心值），与V2间隔至少15分，提高下限以找到更高概率学校
+                4: (25, 45),     # V4: 稳妥/保底（35中心값），与V3间隔至少15分
+                5: (45, 65),     # V5: 保底（55中心값），与V4间隔至少15分
+                6: (65, 85)      # V6: 强保底（75中心값），与V5间隔至少15分
             }
             max_volunteers = 6
         elif plan_type == "balanced":
@@ -699,7 +700,14 @@ class AdvisorService:
             
             # ⭐ DEBUG: 输出初始候选学校数量
             if plan_type == "aggressive" and pos in [3, 4]:
-                print(f"🔍 V{pos} 初始候选学校数: {len(candidate_schools)}, 分差范围: [{min_gap}, {max_gap}]")
+                print(f"🔍 V{pos} 初始候选: {len(candidate_schools)}所, 范围:[{min_gap},{max_gap}]")
+                
+                # 检查分差间隔要求
+                if volunteers:
+                    prev_gap = volunteers[-1].estimated_score_gap
+                    min_required_gap = prev_gap + 15
+                    after_gap_filter = [s for s in candidate_schools if s.get('score_gap', 0) >= min_required_gap]
+                    print(f"   经过间隔过滤(≥{min_required_gap}): {len(after_gap_filter)}所")
             
             # ⭐ CRITICAL FIX: After initial filtering, ensure all candidates have gap > prev_gap
             if volunteers:
@@ -925,16 +933,67 @@ class AdvisorService:
             
             # ⭐ CRITICAL FIX: 如果遍历完所有候选学校后，仍然没有选中任何学校
             # 说明所有学校的概率都低于阈值，此时应该选择概率最高的那个，而不是跳过位置
-            if not primary_selected and position_candidates:
-                # 按概率从高到低排序，选择概率最高的
-                position_candidates.sort(key=lambda x: x.admission_probability, reverse=True)
-                best_candidate = position_candidates[0]
+            if not primary_selected and selected_candidates:
+                # 从selected_candidates中选择概率最高的（即使低于阈值）
+                best_school_data = max(selected_candidates, key=lambda s: s.get('score_gap', 0))
                 
-                # 警告：这个学校的概率低于理想阈值
-                print(f"⚠️ 警告：V{pos}位置找不到符合概率要求的学校，使用概率最高的选项（{best_candidate.admission_probability*100:.1f}%）")
+                # 重新计算这个学校的概率和信息
+                school_id = best_school_data['school_id']
+                school_name = best_school_data['school_name']
+                district_name = best_school_data['district']
+                score_gap = best_school_data['score_gap']
+                last_volunteer_rank = best_school_data['last_volunteer_rank']
+                school_gradient = best_school_data.get('school_gradient')
+                trend_info = best_school_data['trend_info']
                 
-                volunteers.append(best_candidate)
-                used_school_ids.add(best_candidate.school_info.school_id)
+                historical_data = self._get_school_historical_data(
+                    school_id, 
+                    trend_info.get('actual_student_type', household_type)
+                )
+                
+                probability = self._calculate_probability_with_gradient(
+                    score_gap,
+                    volunteer_position,
+                    plan_type,
+                    student_gradient,
+                    school_gradient,
+                    last_volunteer_rank,
+                    trend_info.get('trend', '稳定')
+                )
+                
+                risk_level = self._determine_risk_level(probability, score_gap)
+                
+                from ..schemas.response import HistoricalData, ScoreHistory
+                hist_data_obj = HistoricalData(
+                    enrollment_2025=historical_data.get('enrollment_2025'),
+                    scores=[
+                        ScoreHistory(
+                            year=s['year'],
+                            score=s['score'],
+                            last_volunteer_rank=s.get('last_volunteer_rank')
+                        )
+                        for s in historical_data.get('scores', [])
+                    ]
+                )
+                
+                fallback_item = VolunteerItem(
+                    volunteer_number=volunteer_position,
+                    school_info=SchoolInfo(
+                        school_id=school_id,
+                        school_name=school_name,
+                        district=district_name,
+                        school_type="民办" if best_school_data.get('is_private', False) else "公办"
+                    ),
+                    risk_level=risk_level,
+                    admission_probability=probability,
+                    estimated_score_gap=round(score_gap, 1),
+                    historical_data=hist_data_obj
+                )
+                
+                print(f"⚠️ V{pos} 使用Fallback选项: {school_name} (概率{probability*100:.1f}%)")
+                
+                volunteers.append(fallback_item)
+                used_school_ids.add(school_id)
                 primary_selected = True
             
             # Store all candidates for this position (limit to max 5: 1 primary + 4 alternatives)
