@@ -654,11 +654,11 @@ class AdvisorService:
             # 确保相邻位置间隔约20分
             position_ranges = {
                 1: (-35, -20),   # V1: 强冲刺（-27.5中心值）
-                2: (-20, -8),    # V2: 中度冲刺（-14中心值），间距~13.5
-                3: (-8, 8),      # V3: 轻度冲刺/稳妥（0中心值），间距~14
-                4: (8, 28),      # V4: 稳妥（18中心값），间距~18
-                5: (28, 48),     # V5: 保底（38中心값），间距~20
-                6: (48, 70)      # V6: 强保底（59中心값），间距~21
+                2: (-18, -5),    # V2: 中度冲刺（-11.5中心值），与V1间隔至少15分
+                3: (0, 15),      # V3: 轻度冲刺/稳妥（7.5中心值），与V2间隔至少15分
+                4: (18, 35),     # V4: 稳妥（26.5中心값），与V3间隔至少15分
+                5: (38, 55),     # V5: 保底（46.5中心값），与V4间隔至少15分
+                6: (58, 75)      # V6: 强保底（66.5中心값），与V5间隔至少15分
             }
             max_volunteers = 6
         elif plan_type == "balanced":
@@ -697,63 +697,97 @@ class AdvisorService:
                 and min_gap <= s.get('score_gap', 0) <= max_gap
             ]
             
+            # ⭐ DEBUG: 输出初始候选学校数量
+            if plan_type == "aggressive" and pos in [3, 4]:
+                print(f"🔍 V{pos} 初始候选学校数: {len(candidate_schools)}, 分差范围: [{min_gap}, {max_gap}]")
+            
             # ⭐ CRITICAL FIX: After initial filtering, ensure all candidates have gap > prev_gap
             if volunteers:
                 prev_gap = volunteers[-1].estimated_score_gap
-                min_required_gap = prev_gap + 10  # 调整为10分，确保志愿间有合理间距
+                min_required_gap = prev_gap + 15  # ⭐ 提高到15分，确保志愿间有足够间距
                 
                 candidate_schools = [
                     s for s in candidate_schools
                     if s.get('score_gap', 0) >= min_required_gap
                 ]
                 
-                # Force fallback by clearing candidate_schools if order is violated
-                if candidate_schools is not None and len(candidate_schools) == 0:
-                    candidate_schools = []
+                # ⭐ 如果过滤后没有候选学校，说明间隔要求与位置范围冲突
+                # 此时应该放宽间隔要求，优先满足位置范围
+                if len(candidate_schools) == 0:
+                    # 逐步放宽间隔要求
+                    for relaxed_gap in [10, 5, 0]:
+                        candidate_schools = [
+                            s for s in schools_data 
+                            if s['school_id'] not in used_school_ids
+                            and min_gap <= s.get('score_gap', 0) <= max_gap
+                            and s.get('score_gap', 0) >= prev_gap + relaxed_gap
+                        ]
+                        if candidate_schools:
+                            print(f"⚠️ V{pos} 放宽间隔要求至{relaxed_gap}分，找到{len(candidate_schools)}所候选学校")
+                            break
             
             # If still no candidates after order filter, use fallback
             if not candidate_schools:
-                # ⭐ CRITICAL FIX: Must find schools for this position!
-                # Gradually expand the search range until we find candidates
+                # ⭐ CRITICAL FIX: 严禁跳过志愿位置！
+                # 即使找不到理想学校，也要放宽条件填充该位置
+                # 原因：志愿填报必须连续，不能有断层
                 
                 prev_gap = volunteers[-1].estimated_score_gap if volunteers else -35
-                min_acceptable_gap = prev_gap + 10  # 调整为10分最小间隔
                 
-                # Try multiple expansion strategies
-                for attempt in range(1, 6):
-                    if attempt == 1:
-                        # Strategy 1: Expand range slightly
-                        expanded_min = min_gap - 10 * attempt
-                        expanded_max = max_gap + 10 * attempt
-                    elif attempt == 2:
-                        # Strategy 2: Focus on gap order, ignore range
-                        expanded_min = min_acceptable_gap
-                        expanded_max = 100
-                    elif attempt == 3:
-                        # Strategy 3: Lower minimum requirement
-                        expanded_min = prev_gap + 2
-                        expanded_max = 100
+                # 逐步放宽条件，直到找到至少一个学校
+                for attempt in range(1, 8):  # 增加到8次尝试
+                    if attempt <= 3:
+                        # 策略1-3：扩大分差范围
+                        expanded_min = min_gap - 15 * attempt
+                        expanded_max = max_gap + 15 * attempt
                     elif attempt == 4:
-                        # Strategy 4: Any remaining school with positive gap
-                        expanded_min = 0
+                        # 策略4：只要求大于前一志愿的分差
+                        expanded_min = prev_gap + 10  # 降低到10分间隔
+                        expanded_max = 100
+                    elif attempt == 5:
+                        # 策略5：进一步降低间隔要求
+                        expanded_min = prev_gap + 5  # 最低5分间隔
+                        expanded_max = 100
+                    elif attempt == 6:
+                        # 策略6：允许与前一志愿相同分差
+                        expanded_min = prev_gap
                         expanded_max = 100
                     else:
-                        # Strategy 5: Last resort - any remaining school with POSITIVE gap
-                        expanded_min = 0  # Only positive gaps
-                        expanded_max = 100
+                        # 策略7（最后手段）：任何未使用的学校
+                        expanded_min = -100
+                        expanded_max = 200
                     
                     candidate_schools = [
                         s for s in schools_data 
                         if s['school_id'] not in used_school_ids
                         and expanded_min <= s.get('score_gap', 0) <= expanded_max
-                        and s.get('score_gap', 0) >= min_acceptable_gap  # Always enforce minimum gap
                     ]
                     
                     if candidate_schools:
                         break
                 
+                # 如果仍然没有候选学校，使用全局剩余学校中分差最接近的
                 if not candidate_schools:
-                    continue  # Skip this position, don't force a bad choice
+                    remaining_schools = [
+                        s for s in schools_data 
+                        if s['school_id'] not in used_school_ids
+                    ]
+                    if remaining_schools:
+                        # 选择分差最接近目标范围的学校
+                        target_mid = (min_gap + max_gap) / 2
+                        candidate_schools = sorted(
+                            remaining_schools,
+                            key=lambda s: abs(s.get('score_gap', 0) - target_mid)
+                        )[:1]
+                
+                # 如果仍然为空，说明所有学校都已使用，这是极端情况
+                if not candidate_schools:
+                    # 记录警告，但不再跳过位置（此处实际上已无法填充，只能跳过）
+                    # 但在逻辑上我们已经尽力了，之前的 continue 被移除，
+                    # 如果这里还是空，下面的逻辑会处理（不添加志愿者，但循环继续）
+                    # 为了保持代码健壮性，如果确实没学校了，只能跳过
+                    print(f"⚠️ 警告：V{pos}位置无法找到合适学校，所有学校已使用")
+                    continue
             
             # ⭐ SIMPLIFIED LOGIC: Don't re-sort within each position
             # The schools_data is already sorted by (gradient, score_gap) ascending
@@ -819,15 +853,38 @@ class AdvisorService:
                     trend_info.get('trend', '稳定')
                 )
                 
-                # Set probability threshold based on position
-                if pos >= 5:
-                    min_probability = 0.02  # Safety positions: 2% minimum
-                elif pos >= 3:
-                    min_probability = 0.03  # Middle positions: 3% minimum
-                else:
-                    min_probability = 0.04  # Early positions: 4% minimum
+                # ⭐ 设置概率阈值 - 基于志愿位置和策略类型
+                # 核心原则：每个志愿都应有实际意义，避免推荐几乎不可能录取的学校
+                # ⭐ 新增：V3及之后严禁冲刺，确保风险递进
+                if plan_type == "aggressive":
+                    # 激进方案：允许较低概率，但仍需有基本希望
+                    if pos >= 5:
+                        min_probability = 0.70  # V5-V6保底：至少70%
+                    elif pos >= 3:
+                        min_probability = 0.40  # V3-V4稳妥：至少40%（严禁冲刺<50%，但允许40-50%的过渡区）
+                    else:
+                        min_probability = 0.15  # V1-V2冲刺：至少15%
+                elif plan_type == "balanced":
+                    # 平衡方案：中等概率要求
+                    if pos >= 5:
+                        min_probability = 0.70  # V5-V6保底：至少70%
+                    elif pos >= 3:
+                        min_probability = 0.50  # V3-V4稳妥：至少50%
+                    else:
+                        min_probability = 0.20  # V1-V2冲刺：至少20%
+                else:  # conservative
+                    # 保守方案：高概率要求
+                    if pos >= 5:
+                        min_probability = 0.80  # V5-V6保底：至少80%
+                    elif pos >= 3:
+                        min_probability = 0.60  # V3-V4稳妥：至少60%
+                    else:
+                        min_probability = 0.40  # V1-V2稳妥：至少40%
                 
                 if probability < min_probability:
+                    # ⭐ DEBUG: 记录被过滤的学校
+                    if plan_type == "aggressive" and pos in [3, 4]:
+                        print(f"   ❌ {school_name}: 概率{probability*100:.1f}% < 阈值{min_probability*100:.1f}%，被过滤")
                     continue
                 
                 risk_level = self._determine_risk_level(probability, score_gap)
@@ -866,6 +923,20 @@ class AdvisorService:
                     used_school_ids.add(school_id)
                     primary_selected = True
             
+            # ⭐ CRITICAL FIX: 如果遍历完所有候选学校后，仍然没有选中任何学校
+            # 说明所有学校的概率都低于阈值，此时应该选择概率最高的那个，而不是跳过位置
+            if not primary_selected and position_candidates:
+                # 按概率从高到低排序，选择概率最高的
+                position_candidates.sort(key=lambda x: x.admission_probability, reverse=True)
+                best_candidate = position_candidates[0]
+                
+                # 警告：这个学校的概率低于理想阈值
+                print(f"⚠️ 警告：V{pos}位置找不到符合概率要求的学校，使用概率最高的选项（{best_candidate.admission_probability*100:.1f}%）")
+                
+                volunteers.append(best_candidate)
+                used_school_ids.add(best_candidate.school_info.school_id)
+                primary_selected = True
+            
             # Store all candidates for this position (limit to max 5: 1 primary + 4 alternatives)
             if position_candidates:
                 # ⭐ Limit to maximum 5 candidates per position
@@ -873,7 +944,7 @@ class AdvisorService:
                 if len(position_candidates) > MAX_CANDIDATES_PER_POSITION:
                     position_candidates = position_candidates[:MAX_CANDIDATES_PER_POSITION]
                 
-                position_strategy = "冲刺" if pos <= 2 else ("稳妥" if pos <= 4 else "保底")
+                position_strategy = "冲刺" if pos <= 2 else ("稳妥" if pos <= 4 else "保守")
                 all_position_candidates.append(
                     VolunteerPosition(
                         position_number=pos,
@@ -1100,7 +1171,7 @@ class AdvisorService:
             score_gap: 分数差（仅用于辅助判断，已废弃）
         
         Returns:
-            风险等级：冲刺/稳妥/保底
+            风险等级：冲刺/稳妥/保守
         """
         # ⭐ 核心原则：风险等级主要基于录取概率
         if probability < 0.50:
@@ -1108,7 +1179,7 @@ class AdvisorService:
         elif probability < 0.80:
             return "稳妥"  # 概率50%-80%，相对稳妥
         else:
-            return "保底"  # 概率≥80%，安全保底
+            return "保守"  # 概率≥80%，安全保底
     
     def _get_school_historical_data(
         self,

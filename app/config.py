@@ -35,7 +35,7 @@ VOLUNTEER_COUNT = 6  # 可填报的志愿数量
 RISK_LEVELS = {
     "冲刺": {"min_prob": 0.2, "max_prob": 0.5, "color": "#ff4757"},
     "稳妥": {"min_prob": 0.5, "max_prob": 0.85, "color": "#ffa502"},
-    "保底": {"min_prob": 0.85, "max_prob": 1.0, "color": "#2ed573"}
+    "保守": {"min_prob": 0.85, "max_prob": 1.0, "color": "#2ed573"}
 }
 
 # 学籍区列表（只包含行政区，不包含省市属）
