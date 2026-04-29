@@ -237,23 +237,170 @@
 
         /* 响应式设计 */
         @media (max-width: 768px) {
+            /* 手机端适配 */
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: 12px;
+            }
+
+            .header {
+                padding: 20px 15px;
+            }
+
             .header h1 {
-                font-size: 24px;
+                font-size: 22px;
+            }
+
+            .header p {
+                font-size: 14px;
+            }
+
+            .back-link {
+                font-size: 13px;
+                padding: 6px 12px;
+            }
+
+            .content {
+                padding: 15px;
+            }
+
+            .filter-section {
+                padding: 15px;
             }
 
             .filter-row {
                 grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .filter-group label {
+                font-size: 13px;
+            }
+
+            .filter-group select {
+                padding: 10px;
+                font-size: 14px;
+            }
+
+            .btn-search {
+                padding: 12px;
+                font-size: 14px;
             }
 
             .stats-bar {
                 flex-direction: column;
                 gap: 10px;
                 text-align: center;
+                padding: 12px;
+            }
+
+            .stat-item {
+                font-size: 13px;
+            }
+
+            /* 表格横向滚动 */
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            table {
+                min-width: 600px;
             }
 
             th, td {
-                padding: 10px;
+                padding: 8px 6px;
                 font-size: 12px;
+            }
+
+            th {
+                font-size: 11px;
+            }
+
+            /* 图表容器 */
+            .chart-container {
+                padding: 15px;
+                height: 300px;
+            }
+
+            /* 空状态 */
+            .empty-state {
+                padding: 30px 15px;
+            }
+
+            .empty-state-icon {
+                font-size: 48px;
+            }
+
+            .loading {
+                padding: 30px;
+            }
+
+            .spinner {
+                width: 30px;
+                height: 30px;
+            }
+        }
+
+        /* 平板端适配 */
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .container {
+                max-width: 95%;
+            }
+
+            .header h1 {
+                font-size: 26px;
+            }
+
+            .filter-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .content {
+                padding: 20px;
+            }
+        }
+
+        /* 大屏幕优化 */
+        @media (min-width: 1400px) {
+            .container {
+                max-width: 1400px;
+            }
+        }
+
+        /* 打印样式 */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .container {
+                box-shadow: none;
+                border-radius: 0;
+            }
+
+            .header {
+                background: white;
+                color: black;
+                padding: 20px;
+            }
+
+            .back-link,
+            .filter-section,
+            .btn-search {
+                display: none;
+            }
+
+            .table-container {
+                overflow: visible;
+            }
+
+            table {
+                min-width: auto;
             }
         }
     </style>
