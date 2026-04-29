@@ -910,7 +910,7 @@ class AdvisorService:
                 )
                 
                 volunteer_item = VolunteerItem(
-                    volunteer_number=volunteer_position,
+                    volunteer_number=len(volunteers) + 1,  # ⭐ 动态编号：根据实际添加顺序生成
                     school_info=SchoolInfo(
                         school_id=school_id,
                         school_name=school_name,
@@ -932,69 +932,12 @@ class AdvisorService:
                     primary_selected = True
             
             # ⭐ CRITICAL FIX: 如果遍历完所有候选学校后，仍然没有选中任何学校
-            # 说明所有学校的概率都低于阈值，此时应该选择概率最高的那个，而不是跳过位置
-            if not primary_selected and selected_candidates:
-                # 从selected_candidates中选择概率最高的（即使低于阈值）
-                best_school_data = max(selected_candidates, key=lambda s: s.get('score_gap', 0))
-                
-                # 重新计算这个学校的概率和信息
-                school_id = best_school_data['school_id']
-                school_name = best_school_data['school_name']
-                district_name = best_school_data['district']
-                score_gap = best_school_data['score_gap']
-                last_volunteer_rank = best_school_data['last_volunteer_rank']
-                school_gradient = best_school_data.get('school_gradient')
-                trend_info = best_school_data['trend_info']
-                
-                historical_data = self._get_school_historical_data(
-                    school_id, 
-                    trend_info.get('actual_student_type', household_type)
-                )
-                
-                probability = self._calculate_probability_with_gradient(
-                    score_gap,
-                    volunteer_position,
-                    plan_type,
-                    student_gradient,
-                    school_gradient,
-                    last_volunteer_rank,
-                    trend_info.get('trend', '稳定')
-                )
-                
-                risk_level = self._determine_risk_level(probability, score_gap)
-                
-                from ..schemas.response import HistoricalData, ScoreHistory
-                hist_data_obj = HistoricalData(
-                    enrollment_2025=historical_data.get('enrollment_2025'),
-                    scores=[
-                        ScoreHistory(
-                            year=s['year'],
-                            score=s['score'],
-                            last_volunteer_rank=s.get('last_volunteer_rank')
-                        )
-                        for s in historical_data.get('scores', [])
-                    ]
-                )
-                
-                fallback_item = VolunteerItem(
-                    volunteer_number=volunteer_position,
-                    school_info=SchoolInfo(
-                        school_id=school_id,
-                        school_name=school_name,
-                        district=district_name,
-                        school_type="民办" if best_school_data.get('is_private', False) else "公办"
-                    ),
-                    risk_level=risk_level,
-                    admission_probability=probability,
-                    estimated_score_gap=round(score_gap, 1),
-                    historical_data=hist_data_obj
-                )
-                
-                print(f"⚠️ V{pos} 使用Fallback选项: {school_name} (概率{probability*100:.1f}%)")
-                
-                volunteers.append(fallback_item)
-                used_school_ids.add(school_id)
-                primary_selected = True
+            # 说明所有学校的概率都低于阈值，此时应该跳过该位置
+            # 由于使用了动态编号，后续志愿会自动递补，保持编号连续
+            if not primary_selected:
+                # 跳过该位置，不添加任何学校
+                # 注意：volunteer_position仍然递增，但不会添加到volunteers列表
+                pass
             
             # Store all candidates for this position (limit to max 5: 1 primary + 4 alternatives)
             if position_candidates:
