@@ -526,7 +526,7 @@
             .mobile-info-row {
                 display: flex;
                 justify-content: space-between;
-                gap: 6px;
+                gap: 8px;
                 margin-bottom: 8px;
             }
 
@@ -1281,11 +1281,6 @@
                 scoreTagsHtml = '<div style="color: #999; font-size: 12px;">暂无历史数据</div>';
             }
             
-            // 招生人数
-            const enrollmentHtml = enrollment2025 !== null && enrollment2025 !== undefined 
-                ? `<div class="mobile-enrollment">👥 2025招生: ${enrollment2025}人</div>`
-                : '';
-            
             cardDiv.innerHTML = `
                 <div class="mobile-volunteer-header">
                     <div class="mobile-volunteer-number ${isPrimary ? '' : 'alternative'}">
@@ -1317,8 +1312,8 @@
                         <div class="mobile-info-value">${vol.school_info.district}</div>
                     </div>
                     <div class="mobile-info-item-compact">
-                        <div class="mobile-info-label">类型</div>
-                        <div class="mobile-info-value">${schoolType}</div>
+                        <div class="mobile-info-label">招生</div>
+                        <div class="mobile-info-value">${enrollment2025 !== null && enrollment2025 !== undefined ? enrollment2025 : '-'}</div>
                     </div>
                 </div>
                 
@@ -1330,8 +1325,6 @@
                     <div class="mobile-score-history-title">📊 历年分数线</div>
                     ${scoreTagsHtml}
                 </div>
-                
-                ${enrollmentHtml}
             `;
             
             return cardDiv;
