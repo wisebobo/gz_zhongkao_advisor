@@ -379,7 +379,7 @@ class AdvisorService:
         
         # 计算加权平均和梯度信息 - 原则5：5年加权平均
         weighted_schools = []
-        weights = {2025: 0.35, 2024: 0.25, 2023: 0.20, 2022: 0.12, 2021: 0.08}  # 调整为5年权重，总和=1.0
+        weights = {2025: 0.45, 2024: 0.3, 2023: 0.15, 2022: 0.1, 2021: 0.0}  # 调整为5年权重，总和=1.0
         
         # ⭐ 预先收集所有民办学校ID（有公费班记录的）
         private_school_ids = set(
@@ -465,7 +465,7 @@ class AdvisorService:
                     'trend': trend,
                     'years_count': years_count,
                     'latest_score': scores.get(2025),
-                    'avg_score': round(predicted_score, 1),
+                    'avg_score': round(predicted_score, 0),
                     'actual_student_type': actual_student_type,
                     'is_external_district': is_external_district,
                     'data_completeness': data_completeness  # complete/partial/minimal
@@ -475,7 +475,7 @@ class AdvisorService:
                     'school_id': school_id,
                     'school_name': info['school_name'],
                     'district': school_district,
-                    'predicted_score': round(predicted_score, 1),
+                    'predicted_score': round(predicted_score, 0),
                     'school_gradient': school_gradient,
                     'last_volunteer_rank': last_volunteer_rank,
                     'trend_info': trend_info,

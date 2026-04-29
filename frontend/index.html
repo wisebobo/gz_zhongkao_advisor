@@ -697,8 +697,8 @@
                 return;
             }
 
-            if (estimatedScore < 0 || estimatedScore > 800) {
-                showError('分数范围必须在0-800之间');
+            if (estimatedScore < 0 || estimatedScore > 810) {
+                showError('分数范围必须在0-810之间');
                 return;
             }
 
@@ -862,7 +862,7 @@
                         </span>
                     </td>
                     <td>${(vol.admission_probability * 100).toFixed(1)}%</td>
-                    <td>${vol.estimated_score_gap > 0 ? '+' : ''}${vol.estimated_score_gap.toFixed(1)}</td>
+                    <td>${vol.estimated_score_gap > 0 ? '+' : ''}${vol.estimated_score_gap.toFixed(0)}</td>
                     <td>${scoreTimelineHtml}</td>
                     <td>${enrollmentHtml}</td>
                 </tr>
