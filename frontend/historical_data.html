@@ -420,8 +420,8 @@
                     <div class="filter-group">
                         <label for="batch-select">选择批次</label>
                         <select id="batch-select">
-                            <option value="batch3">第三批次（公办高中）</option>
-                            <option value="batch4">第四批次（民办高中）</option>
+                            <option value="batch3">第三批次</option>
+                            <option value="batch4">第四批次</option>
                         </select>
                     </div>
 
@@ -532,13 +532,16 @@
             loadSchools();
         };
 
-        // 加载区域列表（历史数据查询专用，包含省市属）
+        // 加载区域列表（从数据库动态获取）
         async function loadDistricts() {
             try {
-                const response = await fetch('/api/v1/config/historical-districts');
+                const batch = document.getElementById('batch-select').value;
+                const response = await fetch(`/api/v1/config/districts-with-data?batch=${batch}`);
                 const data = await response.json();
                 
                 const districtSelect = document.getElementById('district-select');
+                districtSelect.innerHTML = '<option value="">全部区域</option>';
+                
                 data.districts.forEach(district => {
                     const option = document.createElement('option');
                     option.value = district;
@@ -547,7 +550,6 @@
                 });
                 
                 console.log('✅ 区域列表加载完成:', data.districts.length, '个区域');
-                console.log('区域列表:', data.districts);
             } catch (error) {
                 console.error('❌ 加载区域列表失败:', error);
             }
@@ -585,7 +587,10 @@
         }
 
         // 监听筛选条件变化
-        document.getElementById('batch-select').addEventListener('change', updateSchoolList);
+        document.getElementById('batch-select').addEventListener('change', () => {
+            loadDistricts();
+            updateSchoolList();
+        });
         document.getElementById('district-select').addEventListener('change', updateSchoolList);
 
         // 查询数据
@@ -604,10 +609,9 @@
             try {
                 let apiUrl;
                 if (batch === 'batch3') {
-                    apiUrl = '/api/v1/historical/batch3-aggregated';
+                    apiUrl = '/api/v1/historical/batch3-unified';
                 } else {
-                    // 第四批次暂时使用原有API
-                    apiUrl = '/api/v1/historical/batch4';
+                    apiUrl = '/api/v1/historical/batch4-unified';
                 }
                 
                 const params = new URLSearchParams();

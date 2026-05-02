@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>名额分配查询 - 广州中考志愿填报助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 6px;
+            transition: background 0.3s;
+        }
+
+        .back-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .filter-section {
+            background: #f9fafb;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .filter-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+
+        .filter-group select {
+            padding: 10px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn-search {
+            width: 100%;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-search:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-search:active {
+            transform: translateY(0);
+        }
+
+        .stats-section {
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+        }
+
+        .stats-section h3 {
+            color: #1e40af;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .stats-section p {
+            color: #374151;
+            font-size: 14px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+            border-right: 1px solid rgba(255,255,255,0.2);
+        }
+
+        th:last-child {
+            border-right: none;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+            color: #374151;
+        }
+
+        tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6b7280;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state h3 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: #374151;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading p {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: 8px;
+            }
+
+            .header {
+                padding: 20px 15px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .header p {
+                font-size: 12px;
+            }
+
+            .content {
+                padding: 15px;
+            }
+
+            .filter-section {
+                padding: 15px;
+            }
+
+            .filter-row {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .btn-search {
+                font-size: 14px;
+                padding: 10px 20px;
+            }
+
+            /* 手机端隐藏表格，改用卡片布局 */
+            .table-container {
+                display: none !important;
+            }
+
+            /* 显示卡片容器 */
+            .cards-container {
+                display: block !important;
+            }
+
+            .stats-section {
+                padding: 12px 15px;
+            }
+
+            .stats-section h3 {
+                font-size: 14px;
+            }
+
+            .stats-section p {
+                font-size: 12px;
+            }
+        }
+
+        /* 桌面端隐藏卡片布局 */
+        @media (min-width: 769px) {
+            .cards-container {
+                display: none;
+            }
+        }
+
+        /* 卡片样式 - 手机端使用 */
+        .cards-container {
+            margin-top: 20px;
+        }
+
+        .school-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+        }
+
+        .card-header h3 {
+            font-size: 16px;
+            margin: 0 0 5px 0;
+        }
+
+        .card-header .district {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .card-body {
+            padding: 15px;
+        }
+
+        .year-section {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .year-section:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .year-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .data-item {
+            background: #f9fafb;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .data-label {
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .data-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .data-value.quota {
+            color: #1e40af;
+        }
+
+        .data-value.score {
+            color: #9a3412;
+        }
+
+        .data-value.rank {
+            color: #6b21a8;
+        }
+
+        .data-value.batch3 {
+            color: #065f46;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>🎓 第二批次名额分配查询</h1>
+            <p>查询初中学校获得的高中名额分配情况及历年变化趋势</p>
+            <a href="/" class="back-link">← 返回首页</a>
+        </div>
+
+        <div class="content">
+            <!-- 筛选区域 -->
+            <div class="filter-section">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label for="district-select">选择行政区</label>
+                        <select id="district-select" onchange="onDistrictChange()">
+                            <option value="">请选择行政区</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="school-select">选择初中学校</label>
+                        <select id="school-select" disabled>
+                            <option value="">请先选择行政区</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button class="btn-search" onclick="searchData()">
+                    🔍 查询数据
+                </button>
+            </div>
+
+            <!-- 统计信息 -->
+            <div class="stats-section" id="stats-section" style="display:none;">
+                <h3>查询结果</h3>
+                <p id="stats-text"></p>
+            </div>
+
+            <!-- 数据表格 -->
+            <div class="table-container" id="table-container" style="display:none;">
+                <table>
+                    <thead id="data-table-head">
+                        <!-- 动态生成表头 -->
+                    </thead>
+                    <tbody id="data-table-body">
+                        <!-- 动态生成数据行 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 卡片容器（手机端使用） -->
+            <div class="cards-container" id="cards-container" style="display:none;">
+                <!-- 动态生成卡片 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <h3>请选择初中学校并点击查询</h3>
+                <p>您可以查看该初中获得的所有高中名额分配情况及历年变化</p>
+            </div>
+
+            <!-- 加载状态 -->
+            <div class="loading" id="loading" style="display:none;">
+                <div class="spinner"></div>
+                <p>正在查询数据...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allSchools = [];
+        let schoolsByDistrict = {};
+
+        // 初始化页面
+        window.onload = function() {
+            console.log('📄 名额分配查询页面已加载');
+            loadDistricts();
+        };
+
+        // 加载行政区列表
+        async function loadDistricts() {
+            try {
+                const response = await fetch('/api/v1/config/batch2-districts');
+                const data = await response.json();
+                
+                const districtSelect = document.getElementById('district-select');
+                data.districts.forEach(district => {
+                    const option = document.createElement('option');
+                    option.value = district;
+                    option.textContent = district;
+                    districtSelect.appendChild(option);
+                });
+                
+                console.log('✅ 行政区列表加载完成:', data.count, '个区');
+            } catch (error) {
+                console.error('❌ 加载行政区列表失败:', error);
+            }
+        }
+
+        // 行政区变化时加载对应的初中学校
+        async function onDistrictChange() {
+            const district = document.getElementById('district-select').value;
+            const schoolSelect = document.getElementById('school-select');
+            
+            // 重置学校下拉框
+            schoolSelect.innerHTML = '<option value="">请选择初中学校</option>';
+            schoolSelect.disabled = !district;
+            
+            if (!district) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/v1/config/junior-schools?district=${encodeURIComponent(district)}`);
+                const data = await response.json();
+                
+                allSchools = data.schools;
+                
+                data.schools.forEach(school => {
+                    const option = document.createElement('option');
+                    option.value = school;
+                    option.textContent = school;
+                    schoolSelect.appendChild(option);
+                });
+                
+                console.log('✅ 初中学校列表加载完成:', data.count, '所学校');
+            } catch (error) {
+                console.error('❌ 加载学校列表失败:', error);
+            }
+        }
+
+        // 查询数据
+        async function searchData() {
+            const juniorSchoolName = document.getElementById('school-select').value;
+            
+            if (!juniorSchoolName) {
+                alert('请选择初中学校');
+                return;
+            }
+            
+            console.log('🔍 开始查询数据...', juniorSchoolName);
+            
+            // 显示加载状态
+            showLoading();
+            
+            try {
+                const response = await fetch(
+                    `/api/v1/historical/batch2-quota?junior_school_name=${encodeURIComponent(juniorSchoolName)}`
+                );
+                const result = await response.json();
+                
+                console.log('返回数据:', result);
+                
+                if (result.success) {
+                    if (result.data && result.data.length > 0) {
+                        displayResults(result.data);
+                    } else {
+                        showEmptyState('未找到该初中的名额分配数据');
+                    }
+                } else {
+                    showError('查询失败');
+                }
+            } catch (error) {
+                console.error('❌ 查询失败:', error);
+                showError('网络错误，请稍后重试');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 显示结果
+        function displayResults(data) {
+            console.log('📊 开始显示结果，数据量:', data.length);
+            
+            // 隐藏空状态和加载状态
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('loading').style.display = 'none';
+            
+            if (!data || data.length === 0) {
+                showEmptyState('未找到符合条件的数据');
+                return;
+            }
+
+            // 显示统计信息
+            displayStats(data);
+
+            // 获取所有年份（从所有学校中收集）
+            const allYears = new Set();
+            data.forEach(school => {
+                Object.keys(school.years).forEach(year => allYears.add(year));
+            });
+            const sortedYears = Array.from(allYears).sort().reverse(); // 降序排列
+
+            // 动态生成表头（桌面端）
+            generateTableHeader(sortedYears);
+
+            // 生成数据行（桌面端）
+            generateTableRows(data, sortedYears);
+
+            // 生成卡片（手机端）
+            generateCards(data, sortedYears);
+
+            // 显示表格和卡片
+            document.getElementById('table-container').style.display = 'block';
+            document.getElementById('cards-container').style.display = 'block';
+        }
+
+        // 显示统计信息
+        function displayStats(data) {
+            const statsSection = document.getElementById('stats-section');
+            const statsText = document.getElementById('stats-text');
+            
+            const totalHighSchools = data.length;
+            
+            // 计算总名额数
+            let totalQuota = 0;
+            data.forEach(school => {
+                Object.values(school.years).forEach(yearData => {
+                    if (yearData.quota_count) {
+                        totalQuota += yearData.quota_count;
+                    }
+                });
+            });
+            
+            statsText.textContent = `共查询到 ${totalHighSchools} 所高中，累计名额 ${totalQuota} 个`;
+            statsSection.style.display = 'block';
+        }
+
+        // 生成表头
+        function generateTableHeader(years) {
+            const tableHead = document.getElementById('data-table-head');
+            let headerHTML = '<tr><th rowspan="2">高中学校名称</th><th rowspan="2">区域</th>';
+            
+            years.forEach(year => {
+                headerHTML += `<th colspan="4" style="text-align: center;">${year}年</th>`;
+            });
+            headerHTML += '</tr>';
+            
+            // 第二行表头
+            headerHTML += '<tr>';
+            years.forEach(year => {
+                headerHTML += `
+                    <th style="font-size: 12px; background: #dbeafe; color: #1e40af;">名额</th>
+                    <th style="font-size: 12px; background: #fed7aa; color: #9a3412;">末尾考生分数（志愿号）</th>
+                    <th style="font-size: 12px; background: #d1fae5; color: #065f46;">第三批次分数</th>
+                `;
+            });
+            headerHTML += '</tr>';
+            
+            tableHead.innerHTML = headerHTML;
+        }
+
+        // 生成数据行
+        function generateTableRows(data, years) {
+            const tableBody = document.getElementById('data-table-body');
+            tableBody.innerHTML = '';
+            
+            data.forEach(school => {
+                const row = document.createElement('tr');
+                
+                let rowHTML = `
+                    <td><strong>${school.senior_school_name}</strong></td>
+                    <td>${school.district || '-'}</td>
+                `;
+                
+                // 为每个年份添加4个指标
+                years.forEach(year => {
+                    const yearData = school.years[year];
+                    
+                    if (yearData) {
+                        // 名额
+                        const quotaCount = yearData.quota_count !== null && yearData.quota_count !== undefined 
+                            ? yearData.quota_count 
+                            : '-';
+                        rowHTML += `<td style="background: #dbeafe;"><strong>${quotaCount}</strong></td>`;
+                        
+                        // 第二批次分数
+                        const batch2Score = yearData.batch2_min_score !== null && yearData.batch2_min_score !== undefined 
+                            ? yearData.batch2_min_score 
+                            : '-';
+                        const rank = yearData.last_volunteer_rank !== null && yearData.last_volunteer_rank !== undefined 
+                            ? yearData.last_volunteer_rank 
+                            : '-';
+                        rowHTML += `<td style="background: #fed7aa;">${batch2Score}（${rank}）</td>`;
+                        
+                        // 第三批次分数
+                        const batch3Score = yearData.batch3_min_score !== null && yearData.batch3_min_score !== undefined 
+                            ? yearData.batch3_min_score 
+                            : '-';
+                        
+                        // 计算差值
+                        let scoreDiff = '';
+                        if (batch2Score !== '-' && batch3Score !== '-') {
+                            const diff = batch3Score - batch2Score;
+                            scoreDiff = ` (${diff > 0 ? '+' : ''}${diff})`;
+                        }
+                        
+                        rowHTML += `<td style="background: #d1fae5;">${batch3Score}${scoreDiff}</td>`;
+                    } else {
+                        rowHTML += '<td>-</td><td>-</td><td>-</td><td>-</td>';
+                    }
+                });
+                
+                row.innerHTML = rowHTML;
+                tableBody.appendChild(row);
+            });
+        }
+
+        // 显示空状态
+        function showEmptyState(message) {
+            document.getElementById('table-container').style.display = 'none';
+            document.getElementById('cards-container').style.display = 'none';
+            document.getElementById('stats-section').style.display = 'none';
+            document.getElementById('loading').style.display = 'none';
+            
+            const emptyState = document.getElementById('empty-state');
+            emptyState.style.display = 'block';
+            emptyState.querySelector('h3').textContent = message;
+        }
+
+        // 生成卡片（手机端使用）
+        function generateCards(data, years) {
+            const cardsContainer = document.getElementById('cards-container');
+            cardsContainer.innerHTML = '';
+            
+            data.forEach(school => {
+                const card = document.createElement('div');
+                card.className = 'school-card';
+                
+                let cardHTML = `
+                    <div class="card-header">
+                        <h3>${school.senior_school_name}</h3>
+                        <div class="district">📍 ${school.district || '未知区域'}</div>
+                    </div>
+                    <div class="card-body">
+                `;
+                
+                // 按年份倒序显示
+                years.forEach(year => {
+                    const yearData = school.years[year];
+                    
+                    if (yearData) {
+                        const quotaCount = yearData.quota_count !== null && yearData.quota_count !== undefined 
+                            ? yearData.quota_count 
+                            : '-';
+                        const batch2Score = yearData.batch2_min_score !== null && yearData.batch2_min_score !== undefined 
+                            ? yearData.batch2_min_score 
+                            : '-';
+                        const rank = yearData.last_volunteer_rank !== null && yearData.last_volunteer_rank !== undefined 
+                            ? yearData.last_volunteer_rank 
+                            : '-';
+                        const batch3Score = yearData.batch3_min_score !== null && yearData.batch3_min_score !== undefined 
+                            ? yearData.batch3_min_score 
+                            : '-';
+                        
+                        // 计算差值
+                        let scoreDiff = '';
+                        if (batch2Score !== '-' && batch3Score !== '-') {
+                            const diff = batch3Score - batch2Score;
+                            scoreDiff = ` (${diff > 0 ? '+' : ''}${diff})`;
+                        }
+                        
+                        cardHTML += `
+                            <div class="year-section">
+                                <div class="year-title">📅 ${year}年</div>
+                                <div class="data-grid">
+                                    <div class="data-item">
+                                        <div class="data-label">名额</div>
+                                        <div class="data-value quota">${quotaCount}</div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-label">末尾考生分数（志愿号）</div>
+                                        <div class="data-value score">${batch2Score}（${rank}）</div>
+                                    </div>
+                                    <div class="data-item">
+                                        <div class="data-label">第三批次分数</div>
+                                        <div class="data-value batch3">${batch3Score}${scoreDiff}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+                
+                cardHTML += '</div>'; // 关闭 card-body
+                card.innerHTML = cardHTML;
+                cardsContainer.appendChild(card);
+            });
+        }
+
+        // 显示加载状态
+        function showLoading() {
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('table-container').style.display = 'none';
+            document.getElementById('cards-container').style.display = 'none';
+            document.getElementById('stats-section').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        // 隐藏加载状态
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // 显示错误
+        function showError(message) {
+            hideLoading();
+            showEmptyState(message);
+        }
+    </script>
+</body>
+</html>

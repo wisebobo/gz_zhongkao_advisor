@@ -19,6 +19,32 @@ pydantic>=2.9.0,<3.0.0
 python-dotenv>=1.0.1,<2.0.0
 
 # ============================================================================
+# Web Scraping Dependencies (for data_check_tools/crawler)
+# ============================================================================
+
+# HTTP Requests
+requests>=2.31.0,<3.0.0
+
+# HTML Parsing
+beautifulsoup4>=4.12.0,<5.0.0
+lxml>=4.9.0,<6.0.0
+
+# Data Processing
+pandas>=2.0.0,<3.0.0
+
+# Browser Automation (fallback)
+selenium>=4.15.0,<5.0.0
+webdriver-manager>=4.0.0,<5.0.0
+
+# Report Generation
+openpyxl>=3.1.0,<4.0.0
+matplotlib>=3.8.0,<4.0.0
+
+# Utilities
+tqdm>=4.65.0,<5.0.0
+loguru>=0.7.0,<1.0.0
+
+# ============================================================================
 # Notes:
 # - All packages are compatible with Python 3.11, 3.12, 3.13, 3.14+
 # - Version ranges ensure stability while allowing security patches

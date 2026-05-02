@@ -64,6 +64,41 @@ class Batch4Public(Base):
     # 关联学校
     school = relationship("School", backref="batch4_records")
 
+class Batch2QuotaAllocation(Base):
+    """第二批次名额分配表（初中→高中的名额数量）"""
+    __tablename__ = "batch2_quota_allocation"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    junior_school_code = Column(String(50))  # 初中学校代码
+    junior_school_name = Column(String(100), nullable=False, index=True)  # 初中学校名称
+    junior_school_district = Column(String(50), index=True)  # 初中学校所属行政区
+    senior_school_id = Column(Integer, ForeignKey("schools.school_id"), index=True)  # 高中学校ID
+    senior_school_name = Column(String(100))  # 高中学校名称（冗余字段，便于查询）
+    quota_count = Column(Integer)  # 名额数量
+    
+    # 不建立relationship，因为junior_school不在schools表中
+
+class Batch2Quota(Base):
+    """第二批次录取数据表（分数线、排名等）"""
+    __tablename__ = "batch2_quota"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    senior_school_id = Column(Integer, ForeignKey("schools.school_id"), nullable=False, index=True)  # 高中学校ID
+    junior_school_name = Column(String(100), nullable=False, index=True)  # 初中学校名称
+    student_type = Column(String(20), nullable=False)  # 户籍生/非户籍生/不限
+    min_score = Column(Integer)  # 最低录取分数线
+    min_score_rank = Column(Integer)  # 最低分位次
+    last_volunteer_rank = Column(Integer)  # 末位志愿排名
+    last_score = Column(Integer)  # 末位分数
+    last_score_rank = Column(Integer)  # 末位分位次
+    data_source = Column(String(50), default='PDF')  # 数据来源
+    is_admitted = Column(Integer, default=1)  # 是否录取
+    
+    # 关联高中学校
+    senior_school = relationship("School", foreign_keys=[senior_school_id], backref="batch2_quota_records")
+
 class EnrollmentPlan(Base):
     """招生计划表"""
     __tablename__ = "enrollment_plan"

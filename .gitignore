@@ -7,6 +7,8 @@ __pycache__/
 env/
 venv/
 ENV/
+data/
+docs/
 
 # Database temporary files
 *.db-shm
