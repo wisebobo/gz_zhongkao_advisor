@@ -97,6 +97,58 @@ class TableStructureExtractor:
         
         return df
     
+    def extract_table_structure_from_elements(
+        self,
+        text_elements: List[Dict]
+    ) -> Optional[pd.DataFrame]:
+        """
+        直接从文本元素列表提取表格结构（用于二次OCR场景）
+        
+        Args:
+            text_elements: 文本元素列表，每个元素包含：
+                {
+                    'type': 'text',
+                    'bbox': [x1, y1, x2, y2],
+                    'res': {'text': str},
+                    'confidence': float
+                }
+            
+        Returns:
+            DataFrame: 结构化表格数据，失败返回None
+        """
+        if not text_elements:
+            return None
+        
+        # 步骤1: 检测并合并垂直相邻的单元格（换行）
+        merged_elements = self._merge_vertical_cells(text_elements)
+        
+        # 步骤2: 按Y坐标分组（行）
+        row_groups = self._group_by_rows(merged_elements)
+        
+        if not row_groups:
+            return None
+        
+        # 步骤3: 每行内按X坐标排序（列）
+        sorted_rows = []
+        for y_key in sorted(row_groups.keys()):
+            row_elements = row_groups[y_key]
+            sorted_row = sorted(row_elements, key=lambda x: x['bbox'][0])
+            sorted_rows.append(sorted_row)
+        
+        # 步骤4: 构建二维表格
+        table_data = self._build_table_matrix(sorted_rows)
+        
+        if not table_data:
+            return None
+        
+        # 步骤5: 转换为DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # 清理空值
+        df = df.fillna('')
+        
+        return df
+    
     def _extract_text_in_table_region(
         self, 
         table_bbox: List[float],
