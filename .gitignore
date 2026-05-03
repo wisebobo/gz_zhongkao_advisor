@@ -7,12 +7,15 @@ __pycache__/
 env/
 venv/
 ENV/
-data/
-docs/
 
 # Database temporary files
 *.db-shm
 *.db-wal
+
+# Data and Docs (except specs)
+data/
+docs/
+!docs/superpowers/specs/
 
 # Temporary files and reports
 temp/
