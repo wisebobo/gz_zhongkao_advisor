@@ -657,6 +657,7 @@ async def get_batch2_quota_data(
                 # 第二批次录取数据（取户籍生的数据，如果没有则取不限）
                 batch2_rec = db.query(Batch2Quota).filter(
                     Batch2Quota.senior_school_id == senior_school_id,
+                    Batch2Quota.junior_school_name == junior_school_name,  # 添加初中学校过滤
                     Batch2Quota.year == quota_rec.year,
                     Batch2Quota.student_type.in_(['户籍生', '不限'])
                 ).order_by(

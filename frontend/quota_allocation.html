@@ -453,7 +453,7 @@
             </div>
 
             <!-- 卡片容器（手机端使用） -->
-            <div class="cards-container" id="cards-container" style="display:none;">
+            <div class="cards-container" id="cards-container">
                 <!-- 动态生成卡片 -->
             </div>
 
@@ -605,9 +605,9 @@
             // 生成卡片（手机端）
             generateCards(data, sortedYears);
 
-            // 显示表格和卡片
-            document.getElementById('table-container').style.display = 'block';
-            document.getElementById('cards-container').style.display = 'block';
+            // 显示表格和卡片（移除内联样式，由CSS媒体查询控制）
+            document.getElementById('table-container').removeAttribute('style');
+            document.getElementById('cards-container').removeAttribute('style');
         }
 
         // 显示统计信息
@@ -637,7 +637,7 @@
             let headerHTML = '<tr><th rowspan="2">高中学校名称</th><th rowspan="2">区域</th>';
             
             years.forEach(year => {
-                headerHTML += `<th colspan="4" style="text-align: center;">${year}年</th>`;
+                headerHTML += `<th colspan="3" style="text-align: center;">${year}年</th>`;
             });
             headerHTML += '</tr>';
             
@@ -702,7 +702,7 @@
                         
                         rowHTML += `<td style="background: #d1fae5;">${batch3Score}${scoreDiff}</td>`;
                     } else {
-                        rowHTML += '<td>-</td><td>-</td><td>-</td><td>-</td>';
+                        rowHTML += '<td>-</td><td>-</td><td>-</td>';
                     }
                 });
                 
