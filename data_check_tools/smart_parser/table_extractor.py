@@ -89,7 +89,10 @@ class TableStructureExtractor:
         if not table_data:
             return None
         
-        # 步骤6: 转换为DataFrame
+        # 步骤6: 检测并合并表头（关键改进）
+        table_data = self._merge_header_rows(table_data)
+        
+        # 步骤7: 转换为DataFrame
         df = pd.DataFrame(table_data)
         
         # 清理空值
@@ -119,8 +122,12 @@ class TableStructureExtractor:
         if not text_elements:
             return None
         
+        # 步骤0: 水平合并（暂时禁用，测试原始效果）
+        # merged_horizontally = self._merge_horizontal_cells(text_elements)
+        merged_horizontally = text_elements  # 直接使用原始元素
+        
         # 步骤1: 检测并合并垂直相邻的单元格（换行）
-        merged_elements = self._merge_vertical_cells(text_elements)
+        merged_elements = self._merge_vertical_cells(merged_horizontally)
         
         # 步骤2: 按Y坐标分组（行）
         row_groups = self._group_by_rows(merged_elements)
@@ -141,7 +148,10 @@ class TableStructureExtractor:
         if not table_data:
             return None
         
-        # 步骤5: 转换为DataFrame
+        # 步骤5: 检测并合并表头
+        table_data = self._merge_header_rows(table_data)
+        
+        # 步骤6: 转换为DataFrame
         df = pd.DataFrame(table_data)
         
         # 清理空值
@@ -188,6 +198,123 @@ class TableStructureExtractor:
                     text_elements.append(elem)
         
         return text_elements
+    
+    def _merge_horizontal_cells(self, elements: List[Dict]) -> List[Dict]:
+        """
+        水平合并同一行内的相邻字符（解决PaddleOCR字符级检测问题）
+        
+        策略：
+        1. 按Y坐标分组（行）
+        2. 每行内按X坐标排序
+        3. 计算相邻元素的X间隙
+        4. 使用间隙的中位数作为阈值，小于阈值的认为是同一单元格
+        
+        Args:
+            elements: 文本元素列表
+            
+        Returns:
+            合并后的元素列表
+        """
+        if not elements:
+            return []
+        
+        # 步骤1: 按Y坐标分组
+        row_groups = self._group_by_rows(elements)
+        
+        merged = []
+        
+        # 步骤2: 处理每一行
+        for y_key in sorted(row_groups.keys()):
+            row_elements = row_groups[y_key]
+            
+            # 按X坐标排序
+            sorted_row = sorted(row_elements, key=lambda x: x['bbox'][0])
+            
+            if len(sorted_row) == 1:
+                merged.append(sorted_row[0])
+                continue
+            
+            # 步骤3: 计算相邻元素的X间隙
+            gaps = []
+            for i in range(1, len(sorted_row)):
+                prev_x2 = sorted_row[i-1]['bbox'][2]
+                curr_x1 = sorted_row[i]['bbox'][0]
+                gap = curr_x1 - prev_x2
+                gaps.append(gap)
+            
+            if not gaps:
+                merged.extend(sorted_row)
+                continue
+            
+            # 步骤4: 使用中位数作为阈值
+            sorted_gaps = sorted(gaps)
+            median_gap = sorted_gaps[len(sorted_gaps) // 2]
+            
+            # 阈值：中位数的1.5倍，且至少为x_gap_threshold
+            threshold = max(median_gap * 1.5, self.x_gap_threshold)
+            
+            # 步骤5: 根据间隙合并
+            current_group = [sorted_row[0]]
+            
+            for i in range(1, len(sorted_row)):
+                prev_x2 = sorted_row[i-1]['bbox'][2]
+                curr_x1 = sorted_row[i]['bbox'][0]
+                gap = curr_x1 - prev_x2
+                
+                if gap < threshold:
+                    # 同一单元格，继续累积
+                    current_group.append(sorted_row[i])
+                else:
+                    # 新单元格，保存当前组
+                    merged_elem = self._merge_element_group(current_group)
+                    merged.append(merged_elem)
+                    current_group = [sorted_row[i]]
+            
+            # 保存最后一组
+            if current_group:
+                merged_elem = self._merge_element_group(current_group)
+                merged.append(merged_elem)
+        
+        return merged
+    
+    def _merge_element_group(self, group: List[Dict]) -> Dict:
+        """
+        合并一组元素为一个元素
+        
+        Args:
+            group: 元素列表
+            
+        Returns:
+            合并后的元素
+        """
+        if not group:
+            return None
+        
+        if len(group) == 1:
+            return group[0]
+        
+        # 合并文本
+        texts = [elem['res'].get('text', '') for elem in group]
+        merged_text = ''.join(texts)
+        
+        # 合并边界框
+        x1 = min(elem['bbox'][0] for elem in group)
+        y1 = min(elem['bbox'][1] for elem in group)
+        x2 = max(elem['bbox'][2] for elem in group)
+        y2 = max(elem['bbox'][3] for elem in group)
+        
+        # 平均置信度
+        avg_confidence = sum(elem.get('confidence', 1.0) for elem in group) / len(group)
+        
+        return {
+            'type': 'text',
+            'bbox': [x1, y1, x2, y2],
+            'res': {
+                'text': merged_text,
+                'html': ''
+            },
+            'confidence': avg_confidence
+        }
     
     def _merge_vertical_cells(self, elements: List[Dict]) -> List[Dict]:
         """
@@ -398,6 +525,98 @@ class TableStructureExtractor:
             print(f"[WARN] HTML解析失败: {e}")
         
         return None
+    
+    def _merge_header_rows(self, table_data: List[List[str]]) -> List[List[str]]:
+        """
+        检测并合并表头行
+        
+        策略：
+        1. 检测前几行是否为表头（特征：短文本、无数字、大量空值）
+        2. 垂直合并同一列的表头单元格
+        3. 返回合并后的表格数据
+        
+        Args:
+            table_data: 二维表格数据
+            
+        Returns:
+            合并表头后的表格数据
+        """
+        if not table_data or len(table_data) < 2:
+            return table_data
+        
+        # 步骤1: 检测表头行数
+        header_row_count = self._detect_header_rows(table_data)
+        
+        if header_row_count <= 1:
+            # 只有一行或没有表头，不需要合并
+            return table_data
+        
+        print(f"[INFO] 检测到 {header_row_count} 行表头，正在合并...")
+        
+        # 步骤2: 垂直合并表头单元格
+        merged_header = [''] * len(table_data[0])
+        
+        for col_idx in range(len(table_data[0])):
+            header_parts = []
+            for row_idx in range(header_row_count):
+                cell_value = table_data[row_idx][col_idx]
+                if cell_value and str(cell_value).strip():
+                    header_parts.append(str(cell_value).strip())
+            
+            # 用换行符合并同一列的表头
+            merged_header[col_idx] = '\n'.join(header_parts) if header_parts else ''
+        
+        # 步骤3: 构建新表格（合并后的表头 + 数据行）
+        new_table = [merged_header]
+        new_table.extend(table_data[header_row_count:])
+        
+        return new_table
+    
+    def _detect_header_rows(self, table_data: List[List[str]]) -> int:
+        """
+        检测表头行数
+        
+        判断标准：
+        1. 单元格文本长度短（平均<5字符）
+        2. 不包含纯数字（学校代码、名额数量等）
+        3. 空值比例较高
+        
+        Args:
+            table_data: 二维表格数据
+            
+        Returns:
+            表头行数
+        """
+        if not table_data:
+            return 0
+        
+        header_rows = 0
+        
+        for row_idx, row in enumerate(table_data):
+            # 检查这一行是否符合表头特征
+            non_empty_cells = [cell for cell in row if cell and str(cell).strip()]
+            
+            if not non_empty_cells:
+                # 空行，可能是表头的一部分
+                if header_rows > 0:
+                    header_rows += 1
+                continue
+            
+            # 计算平均文本长度
+            avg_length = sum(len(str(cell)) for cell in non_empty_cells) / len(non_empty_cells)
+            
+            # 检查是否包含纯数字（数据行的特征）
+            has_pure_numbers = any(str(cell).isdigit() for cell in non_empty_cells if len(str(cell)) > 1)
+            
+            # 表头特征：短文本 + 无纯数字
+            if avg_length < 5 and not has_pure_numbers:
+                header_rows += 1
+            else:
+                # 遇到数据行，停止检测
+                break
+        
+        # 最多识别前10行为表头
+        return min(header_rows, 10)
     
     def __repr__(self) -> str:
         return (
