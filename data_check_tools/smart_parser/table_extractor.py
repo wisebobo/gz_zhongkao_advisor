@@ -563,8 +563,12 @@ class TableStructureExtractor:
                 if cell_value and str(cell_value).strip():
                     header_parts.append(str(cell_value).strip())
             
-            # 用换行符合并同一列的表头
-            merged_header[col_idx] = '\n'.join(header_parts) if header_parts else ''
+            if not header_parts:
+                merged_header[col_idx] = ''
+                continue
+            
+            # 用换行符合并同一列的表头（保持层次结构）
+            merged_header[col_idx] = '\n'.join(header_parts)
         
         # 步骤3: 构建新表格（合并后的表头 + 数据行）
         new_table = [merged_header]
@@ -617,6 +621,68 @@ class TableStructureExtractor:
         
         # 最多识别前10行为表头
         return min(header_rows, 10)
+    
+    def _smart_merge_header_parts(self, parts: List[str]) -> str:
+        """
+        智能合并表头片段
+        
+        策略：
+        1. 如果所有片段都是单字，尝试组合成词（如 ['序', '号'] → '序号'）
+        2. 如果有长文本，保留换行结构但优化顺序
+        3. 检测常见表头模式并标准化
+        
+        Args:
+            parts: 表头片段列表
+            
+        Returns:
+            合并后的表头文本
+        """
+        if not parts:
+            return ''
+        
+        if len(parts) == 1:
+            return parts[0]
+        
+        # 策略1: 检查是否都是单字，尝试组合
+        all_single_char = all(len(p) == 1 for p in parts)
+        
+        if all_single_char:
+            # 尝试常见的双字词组合
+            combined = ''.join(parts)
+            
+            # 检测常见表头词汇
+            common_headers = {
+                '序号': ['序', '号'],
+                '代码': ['代', '码'],
+                '考生': ['考', '生'],
+                '名额': ['名', '额'],
+                '省市': ['省', '市'],
+                '区属': ['区', '属'],
+                '本部': ['本', '部'],
+                '中学': ['中', '学'],
+            }
+            
+            for header, chars in common_headers.items():
+                if parts == chars:
+                    return header
+            
+            # 如果没有匹配，返回组合后的字符串
+            return combined
+        
+        # 策略2: 混合长度，保留换行但优化
+        # 将短文本（<=2字符）合并到一行，长文本单独一行
+        short_parts = [p for p in parts if len(p) <= 2]
+        long_parts = [p for p in parts if len(p) > 2]
+        
+        if short_parts and long_parts:
+            # 短文本合并，长文本单独
+            short_combined = ''.join(short_parts)
+            long_combined = '\n'.join(long_parts)
+            return f"{short_combined}\n{long_combined}"
+        elif short_parts:
+            return ''.join(short_parts)
+        else:
+            return '\n'.join(long_parts)
     
     def __repr__(self) -> str:
         return (
