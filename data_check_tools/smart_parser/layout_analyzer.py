@@ -57,10 +57,10 @@ class DocumentLayoutAnalyzer:
         try:
             self.engine = PPStructure(
                 show_log=False,
-                recovery=True,      # 保留表格结构
+                recovery=True,      # 启用recovery以获取完整结果
                 lang=lang,
                 use_gpu=use_gpu,
-                table=False,        # 暂时禁用表格识别（避免初始化错误）
+                table=False,        # 禁用内置表格识别（避免兼容性问题）
                 ocr=True            # 启用 OCR
             )
             print("[OK] PP-Structure 初始化完成")
@@ -179,9 +179,9 @@ class DocumentLayoutAnalyzer:
             text = '\n'.join(text_parts)
         
         # 提取置信度
-        confidence = item.get('score', 0.0)
+        confidence = item.get('score', 1.0)  # PaddleOCR 2.7.3可能没有score字段，默认1.0
         if confidence == 0.0 and isinstance(res, dict):
-            confidence = res.get('score', 0.0)
+            confidence = res.get('score', 1.0)
         
         # 构建标准化元素
         element = {
