@@ -6,6 +6,7 @@ PDF OCR 智能文档解析系统
 # 已完成的模块
 from .layout_analyzer import DocumentLayoutAnalyzer
 from .element_classifier import ElementClassifier
+from .table_extractor import TableStructureExtractor
 
 # TODO: 后续添加其他模块
 # from .table_extractor import TableStructureExtractor
@@ -17,7 +18,7 @@ __version__ = "1.0.0"
 __all__ = [
     "DocumentLayoutAnalyzer",
     "ElementClassifier",
-    # "TableStructureExtractor",
+    "TableStructureExtractor",
     # "ArticleTextExtractor",
     # "SeparatedOutputManager",
     # "SmartPDFParser"
