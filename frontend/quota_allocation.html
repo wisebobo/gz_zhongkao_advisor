@@ -573,6 +573,30 @@
             }
         }
 
+        // 学校排序：省市属优先，然后区属，最后按学校名称排序
+        function sortSchools(data) {
+            return data.sort((a, b) => {
+                const districtA = a.district || '';
+                const districtB = b.district || '';
+                
+                // 判断是否为省市属
+                const isProvinceCityA = districtA === '省市属';
+                const isProvinceCityB = districtB === '省市属';
+                
+                // 省市属优先
+                if (isProvinceCityA && !isProvinceCityB) return -1;
+                if (!isProvinceCityA && isProvinceCityB) return 1;
+                
+                // 同属省市属或同属区属，按行政区排序
+                if (districtA !== districtB) {
+                    return districtA.localeCompare(districtB, 'zh-CN');
+                }
+                
+                // 同一行政区，按学校名称排序
+                return a.senior_school_name.localeCompare(b.senior_school_name, 'zh-CN');
+            });
+        }
+
         // 显示结果
         function displayResults(data) {
             console.log('📊 开始显示结果，数据量:', data.length);
@@ -586,8 +610,11 @@
                 return;
             }
 
+            // 排序：省市属优先，然后区属，最后按学校名称排序
+            const sortedData = sortSchools(data);
+
             // 显示统计信息
-            displayStats(data);
+            displayStats(sortedData);
 
             // 获取所有年份（从所有学校中收集）
             const allYears = new Set();
@@ -600,10 +627,10 @@
             generateTableHeader(sortedYears);
 
             // 生成数据行（桌面端）
-            generateTableRows(data, sortedYears);
+            generateTableRows(sortedData, sortedYears);
 
             // 生成卡片（手机端）
-            generateCards(data, sortedYears);
+            generateCards(sortedData, sortedYears);
 
             // 显示表格和卡片（移除内联样式，由CSS媒体查询控制）
             document.getElementById('table-container').removeAttribute('style');
